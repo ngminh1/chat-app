@@ -1,5 +1,6 @@
 package com.chatapp.backend.controller;
 
+import com.chatapp.backend.dto.ConversationResponse;
 import com.chatapp.backend.dto.CreateDirectChatRequest;
 import com.chatapp.backend.dto.MessageResponse;
 import com.chatapp.backend.dto.SendMessageRequest;
@@ -32,5 +33,10 @@ public class ChatController {
     @GetMapping("/conversations/{conversationId}/messages")
     public ResponseEntity<List<MessageResponse>> getMessages(@PathVariable Long conversationId) {
         return ResponseEntity.ok(chatService.getMessages(conversationId));
+    }
+
+    @GetMapping("/conversations/my-chats/{userId}")
+    public ResponseEntity<List<ConversationResponse>> getMyConversations(@PathVariable Long userId) {
+        return ResponseEntity.ok(chatService.getUserConversations(userId));
     }
 }
