@@ -6,6 +6,7 @@ import com.chatapp.backend.dto.SendMessageRequest;
 import com.chatapp.backend.entity.*;
 import com.chatapp.backend.repository.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,9 +21,17 @@ public class ChatService {
     private final ConversationMemberRepository conversationMemberRepository;
     private final MessageRepository messageRepository;
     private final UserRepository userRepository;
+    private final SimpMessagingTemplate messagingTemplate;
 
     @Transactional
     public Conversation createDirectChat(CreateDirectChatRequest request) {
+        List<Conversation> existingChats = conversationRepository
+                .findDirectConversationBetweenUsers(request.getUser1Id(), request.getUser2Id());
+
+        if (!existingChats.isEmpty()) {
+            return existingChats.get(0);
+        }
+
         User user1 = userRepository.findById(request.getUser1Id())
                 .orElseThrow(() -> new RuntimeException("User 1 không tồn tại"));
         User user2 = userRepository.findById(request.getUser2Id())
@@ -62,7 +71,7 @@ public class ChatService {
 
         Message savedMessage = messageRepository.save(message);
 
-        return MessageResponse.builder()
+        MessageResponse response = MessageResponse.builder()
                 .id(savedMessage.getId())
                 .conversationId(conversation.getId())
                 .senderId(sender.getId())
@@ -70,6 +79,11 @@ public class ChatService {
                 .content(savedMessage.getContent())
                 .createdAt(savedMessage.getCreatedAt())
                 .build();
+
+        // Broadcast tin nhắn mới tới topic của phòng chat
+        messagingTemplate.convertAndSend("/topic/conversations/" + conversation.getId(), response);
+
+        return response;
     }
 
     public List<MessageResponse> getMessages(Long conversationId) {
