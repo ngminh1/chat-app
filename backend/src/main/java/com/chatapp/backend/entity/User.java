@@ -1,5 +1,4 @@
-package com.example.backend.entity; // Đổi lại đúng package của bạn nếu khác
-
+package com.chatapp.backend.entity;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;

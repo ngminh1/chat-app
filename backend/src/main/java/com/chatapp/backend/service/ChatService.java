@@ -1,0 +1,88 @@
+package com.chatapp.backend.service;
+
+import com.chatapp.backend.dto.CreateDirectChatRequest;
+import com.chatapp.backend.dto.MessageResponse;
+import com.chatapp.backend.dto.SendMessageRequest;
+import com.chatapp.backend.entity.*;
+import com.chatapp.backend.repository.*;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Service
+@RequiredArgsConstructor
+public class ChatService {
+
+    private final ConversationRepository conversationRepository;
+    private final ConversationMemberRepository conversationMemberRepository;
+    private final MessageRepository messageRepository;
+    private final UserRepository userRepository;
+
+    @Transactional
+    public Conversation createDirectChat(CreateDirectChatRequest request) {
+        User user1 = userRepository.findById(request.getUser1Id())
+                .orElseThrow(() -> new RuntimeException("User 1 không tồn tại"));
+        User user2 = userRepository.findById(request.getUser2Id())
+                .orElseThrow(() -> new RuntimeException("User 2 không tồn tại"));
+
+        Conversation conversation = Conversation.builder()
+                .type(ConversationType.DIRECT)
+                .build();
+        Conversation savedConversation = conversationRepository.save(conversation);
+
+        conversationMemberRepository.save(ConversationMember.builder()
+                .conversation(savedConversation)
+                .user(user1)
+                .build());
+
+        conversationMemberRepository.save(ConversationMember.builder()
+                .conversation(savedConversation)
+                .user(user2)
+                .build());
+
+        return savedConversation;
+    }
+
+    @Transactional
+    public MessageResponse sendMessage(SendMessageRequest request) {
+        Conversation conversation = conversationRepository.findById(request.getConversationId())
+                .orElseThrow(() -> new RuntimeException("Cuộc trò chuyện không tồn tại"));
+
+        User sender = userRepository.findById(request.getSenderId())
+                .orElseThrow(() -> new RuntimeException("Người gửi không tồn tại"));
+
+        Message message = Message.builder()
+                .conversation(conversation)
+                .sender(sender)
+                .content(request.getContent())
+                .build();
+
+        Message savedMessage = messageRepository.save(message);
+
+        return MessageResponse.builder()
+                .id(savedMessage.getId())
+                .conversationId(conversation.getId())
+                .senderId(sender.getId())
+                .senderName(sender.getDisplayName())
+                .content(savedMessage.getContent())
+                .createdAt(savedMessage.getCreatedAt())
+                .build();
+    }
+
+    public List<MessageResponse> getMessages(Long conversationId) {
+        return messageRepository.findByConversationIdOrderByCreatedAtAsc(conversationId)
+                .stream()
+                .map(msg -> MessageResponse.builder()
+                        .id(msg.getId())
+                        .conversationId(msg.getConversation().getId())
+                        .senderId(msg.getSender().getId())
+                        .senderName(msg.getSender().getDisplayName())
+                        .content(msg.getContent())
+                        .createdAt(msg.getCreatedAt())
+                        .build())
+                .collect(Collectors.toList());
+    }
+}
