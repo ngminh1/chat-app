@@ -1,0 +1,15 @@
+package com.chatapp.backend.dto;
+
+import lombok.*;
+
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class ReplyPreviewResponse {
+    private Long messageId;
+    private Long senderId;
+    private String senderName;
+    private String content;
+}

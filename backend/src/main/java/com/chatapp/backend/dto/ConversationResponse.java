@@ -1,10 +1,7 @@
 package com.chatapp.backend.dto;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import com.chatapp.backend.entity.ConversationType;
+import lombok.*;
 
 import java.time.LocalDateTime;
 
@@ -15,7 +12,13 @@ import java.time.LocalDateTime;
 @Builder
 public class ConversationResponse {
     private Long conversationId;
+    private ConversationType type;
+    private String title;
+    private String avatarUrl;
+    private String theme;
+    private int memberCount;
     private UserResponse otherUser;
     private String lastMessage;
     private LocalDateTime lastMessageTime;
+    private long unreadCount;
 }

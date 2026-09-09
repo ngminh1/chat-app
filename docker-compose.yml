@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # 1. Cơ sở dữ liệu MySQL 8.0
+  mysql:
+    image: mysql:8.0
+    container_name: chatapp_mysql
+    restart: always
+    environment:
+      MYSQL_DATABASE: chat_app
+      MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - chatapp_network
+
+  # 2. Backend Spring Boot
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: chatapp_backend
+    restart: always
+    depends_on:
+      - mysql
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/chat_app?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ""
+      FILE_UPLOAD_DIR: /app/uploads
+    volumes:
+      - uploads_data:/app/uploads
+    ports:
+      - "8080:8080"
+    networks:
+      - chatapp_network
+
+  # 3. Frontend React + Nginx Proxy
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: chatapp_frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    networks:
+      - chatapp_network
+
+volumes:
+  mysql_data:
+  uploads_data:
+
+networks:
+  chatapp_network:
+    driver: bridge

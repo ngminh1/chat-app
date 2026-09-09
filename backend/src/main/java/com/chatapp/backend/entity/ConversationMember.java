@@ -1,6 +1,7 @@
 package com.chatapp.backend.entity;
-import lombok.*;
+
 import jakarta.persistence.*;
+import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
@@ -26,7 +27,14 @@ public class ConversationMember {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
+    @Enumerated(EnumType.STRING)
+    @Builder.Default
+    @Column(name = "role", length = 20)
+    private MemberRole role = MemberRole.MEMBER;
+
     @CreationTimestamp
-    @Column(name = "joined_at", updatable = false)
     private LocalDateTime joinedAt;
+
+    @Column(name = "last_read_at")
+    private LocalDateTime lastReadAt;
 }

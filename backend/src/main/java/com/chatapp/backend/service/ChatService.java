@@ -1,10 +1,6 @@
 package com.chatapp.backend.service;
 
-import com.chatapp.backend.dto.ConversationResponse;
-import com.chatapp.backend.dto.CreateDirectChatRequest;
-import com.chatapp.backend.dto.MessageResponse;
-import com.chatapp.backend.dto.SendMessageRequest;
-import com.chatapp.backend.dto.UserResponse;
+import com.chatapp.backend.dto.*;
 import com.chatapp.backend.entity.*;
 import com.chatapp.backend.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -14,22 +10,50 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Transactional
 public class ChatService {
 
     private final ConversationRepository conversationRepository;
     private final ConversationMemberRepository conversationMemberRepository;
     private final MessageRepository messageRepository;
+    private final MessageReactionRepository messageReactionRepository;
     private final UserRepository userRepository;
     private final SimpMessagingTemplate messagingTemplate;
 
-    @Transactional
+    public void updateUserPresence(Long userId, boolean isOnline) {
+        userRepository.findById(userId).ifPresent(user -> {
+            user.setIsOnline(isOnline);
+            user.setLastSeenAt(LocalDateTime.now());
+            userRepository.save(user);
+
+            PresenceResponse presence = PresenceResponse.builder()
+                    .userId(user.getId())
+                    .isOnline(isOnline)
+                    .lastSeenAt(user.getLastSeenAt())
+                    .build();
+
+            messagingTemplate.convertAndSend("/topic/presence", presence);
+        });
+    }
+
+    public Conversation updateConversationTheme(Long conversationId, String theme) {
+        Conversation conv = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new RuntimeException("Cuộc trò chuyện không tồn tại"));
+        conv.setTheme(theme);
+        Conversation saved = conversationRepository.save(conv);
+
+        messagingTemplate.convertAndSend("/topic/conversations/" + conversationId + "/theme", theme);
+        return saved;
+    }
+
     public Conversation createDirectChat(CreateDirectChatRequest request) {
         List<Conversation> existingChats = conversationRepository
                 .findDirectConversationBetweenUsers(request.getUser1Id(), request.getUser2Id());
@@ -45,23 +69,177 @@ public class ChatService {
 
         Conversation conversation = Conversation.builder()
                 .type(ConversationType.DIRECT)
+                .theme("blue")
                 .build();
         Conversation savedConversation = conversationRepository.save(conversation);
 
-        conversationMemberRepository.save(ConversationMember.builder()
+        ConversationMember member1 = ConversationMember.builder()
                 .conversation(savedConversation)
                 .user(user1)
-                .build());
+                .role(MemberRole.MEMBER)
+                .lastReadAt(LocalDateTime.now())
+                .build();
+        conversationMemberRepository.save(member1);
 
-        conversationMemberRepository.save(ConversationMember.builder()
+        ConversationMember member2 = ConversationMember.builder()
                 .conversation(savedConversation)
                 .user(user2)
-                .build());
+                .role(MemberRole.MEMBER)
+                .lastReadAt(LocalDateTime.now())
+                .build();
+        conversationMemberRepository.save(member2);
 
         return savedConversation;
     }
 
-    @Transactional
+    public Conversation createGroupChat(CreateGroupChatRequest request) {
+        User creator = userRepository.findById(request.getCreatorId())
+                .orElseThrow(() -> new RuntimeException("Người tạo nhóm không tồn tại"));
+
+        String groupTitle = (request.getTitle() != null && !request.getTitle().trim().isEmpty())
+                ? request.getTitle().trim()
+                : "Nhóm của " + creator.getDisplayName();
+
+        Conversation group = Conversation.builder()
+                .type(ConversationType.GROUP)
+                .title(groupTitle)
+                .avatarUrl(request.getAvatarUrl())
+                .theme("blue")
+                .build();
+        Conversation savedGroup = conversationRepository.save(group);
+
+        ConversationMember adminMember = ConversationMember.builder()
+                .conversation(savedGroup)
+                .user(creator)
+                .role(MemberRole.ADMIN)
+                .lastReadAt(LocalDateTime.now())
+                .build();
+        conversationMemberRepository.save(adminMember);
+
+        Set<Long> uniqueMemberIds = new HashSet<>(request.getMemberIds() != null ? request.getMemberIds() : List.of());
+        uniqueMemberIds.remove(creator.getId());
+
+        for (Long memberId : uniqueMemberIds) {
+            userRepository.findById(memberId).ifPresent(user -> {
+                ConversationMember member = ConversationMember.builder()
+                        .conversation(savedGroup)
+                        .user(user)
+                        .role(MemberRole.MEMBER)
+                        .lastReadAt(LocalDateTime.now())
+                        .build();
+                conversationMemberRepository.save(member);
+            });
+        }
+
+        sendSystemMessage(savedGroup, creator, creator.getDisplayName() + " đã tạo nhóm \"" + groupTitle + "\"");
+        return savedGroup;
+    }
+
+    public void addGroupMember(Long conversationId, Long currentUserId, Long targetUserId) {
+        Conversation conv = getGroupConversation(conversationId);
+        validateGroupMembership(conv.getId(), currentUserId);
+
+        Optional<ConversationMember> existing = conversationMemberRepository.findByConversationIdAndUserId(conv.getId(), targetUserId);
+        if (existing.isPresent()) {
+            throw new RuntimeException("Người dùng đã ở trong nhóm");
+        }
+
+        User targetUser = userRepository.findById(targetUserId)
+                .orElseThrow(() -> new RuntimeException("Người dùng không tồn tại"));
+        User currentUser = userRepository.findById(currentUserId)
+                .orElseThrow(() -> new RuntimeException("User hiện tại không tồn tại"));
+
+        ConversationMember newMember = ConversationMember.builder()
+                .conversation(conv)
+                .user(targetUser)
+                .role(MemberRole.MEMBER)
+                .lastReadAt(LocalDateTime.now())
+                .build();
+        conversationMemberRepository.save(newMember);
+
+        sendSystemMessage(conv, currentUser, currentUser.getDisplayName() + " đã thêm " + targetUser.getDisplayName() + " vào nhóm");
+    }
+
+    public void removeGroupMember(Long conversationId, Long currentUserId, Long targetUserId) {
+        Conversation conv = getGroupConversation(conversationId);
+        ConversationMember currentMember = conversationMemberRepository.findByConversationIdAndUserId(conv.getId(), currentUserId)
+                .orElseThrow(() -> new RuntimeException("Bạn không ở trong nhóm này"));
+
+        if (currentMember.getRole() != MemberRole.ADMIN) {
+            throw new RuntimeException("Chỉ Quản trị viên (Admin) mới có quyền xóa thành viên");
+        }
+
+        ConversationMember targetMember = conversationMemberRepository.findByConversationIdAndUserId(conv.getId(), targetUserId)
+                .orElseThrow(() -> new RuntimeException("Thành viên không tồn tại trong nhóm"));
+
+        User targetUser = targetMember.getUser();
+        User currentUser = currentMember.getUser();
+
+        conversationMemberRepository.delete(targetMember);
+        sendSystemMessage(conv, currentUser, currentUser.getDisplayName() + " đã xóa " + targetUser.getDisplayName() + " khỏi nhóm");
+    }
+
+    public void leaveGroup(Long conversationId, Long userId) {
+        Conversation conv = getGroupConversation(conversationId);
+        ConversationMember member = conversationMemberRepository.findByConversationIdAndUserId(conv.getId(), userId)
+                .orElseThrow(() -> new RuntimeException("Bạn không ở trong nhóm này"));
+
+        User user = member.getUser();
+        conversationMemberRepository.delete(member);
+
+        List<ConversationMember> remainingMembers = conversationMemberRepository.findByConversationId(conv.getId());
+        if (remainingMembers.isEmpty()) {
+            conversationRepository.delete(conv);
+            return;
+        }
+
+        if (member.getRole() == MemberRole.ADMIN) {
+            boolean hasOtherAdmin = remainingMembers.stream().anyMatch(m -> m.getRole() == MemberRole.ADMIN);
+            if (!hasOtherAdmin) {
+                ConversationMember newAdmin = remainingMembers.get(0);
+                newAdmin.setRole(MemberRole.ADMIN);
+                conversationMemberRepository.save(newAdmin);
+            }
+        }
+
+        sendSystemMessage(conv, user, user.getDisplayName() + " đã rời khỏi nhóm");
+    }
+
+    public Conversation updateGroupInfo(Long conversationId, Long currentUserId, UpdateGroupRequest request) {
+        Conversation conv = getGroupConversation(conversationId);
+        ConversationMember currentMember = conversationMemberRepository.findByConversationIdAndUserId(conv.getId(), currentUserId)
+                .orElseThrow(() -> new RuntimeException("Bạn không ở trong nhóm này"));
+
+        if (request.getTitle() != null && !request.getTitle().trim().isEmpty()) {
+            conv.setTitle(request.getTitle().trim());
+        }
+        if (request.getAvatarUrl() != null) {
+            conv.setAvatarUrl(request.getAvatarUrl().trim());
+        }
+
+        Conversation saved = conversationRepository.save(conv);
+        sendSystemMessage(saved, currentMember.getUser(), currentMember.getUser().getDisplayName() + " đã cập nhật thông tin nhóm");
+        return saved;
+    }
+
+    @Transactional(readOnly = true)
+    public List<GroupMemberResponse> getGroupMembers(Long conversationId) {
+        List<ConversationMember> members = conversationMemberRepository.findByConversationId(conversationId);
+        List<GroupMemberResponse> result = new ArrayList<>();
+        for (ConversationMember m : members) {
+            User u = m.getUser();
+            result.add(GroupMemberResponse.builder()
+                    .userId(u.getId())
+                    .username(u.getUsername())
+                    .displayName(u.getDisplayName())
+                    .avatarUrl(u.getAvatarUrl())
+                    .role(m.getRole())
+                    .joinedAt(m.getJoinedAt())
+                    .build());
+        }
+        return result;
+    }
+
     public MessageResponse sendMessage(SendMessageRequest request) {
         Conversation conversation = conversationRepository.findById(request.getConversationId())
                 .orElseThrow(() -> new RuntimeException("Cuộc trò chuyện không tồn tại"));
@@ -69,82 +247,435 @@ public class ChatService {
         User sender = userRepository.findById(request.getSenderId())
                 .orElseThrow(() -> new RuntimeException("Người gửi không tồn tại"));
 
+        Message replyToMessage = null;
+        if (request.getReplyToId() != null) {
+            replyToMessage = messageRepository.findById(request.getReplyToId()).orElse(null);
+        }
+
+        MessageType type = request.getMessageType() != null ? request.getMessageType() : MessageType.TEXT;
+
         Message message = Message.builder()
                 .conversation(conversation)
                 .sender(sender)
                 .content(request.getContent())
+                .messageType(type)
+                .mediaUrl(request.getMediaUrl())
+                .fileName(request.getFileName())
+                .fileSize(request.getFileSize())
+                .replyTo(replyToMessage)
+                .isEdited(false)
+                .isDeleted(false)
+                .isPinned(false)
+                .reactions(new ArrayList<>())
                 .build();
 
         Message savedMessage = messageRepository.save(message);
 
-        MessageResponse response = MessageResponse.builder()
-                .id(savedMessage.getId())
-                .conversationId(conversation.getId())
-                .senderId(sender.getId())
-                .senderName(sender.getDisplayName())
-                .content(savedMessage.getContent())
-                .createdAt(savedMessage.getCreatedAt())
-                .build();
+        conversationMemberRepository.findByConversationIdAndUserId(conversation.getId(), sender.getId())
+                .ifPresent(member -> {
+                    member.setLastReadAt(savedMessage.getCreatedAt());
+                    conversationMemberRepository.save(member);
+                });
+
+        MessageResponse response = mapToMessageResponse(savedMessage);
 
         messagingTemplate.convertAndSend("/topic/conversations/" + conversation.getId(), response);
+
+        List<ConversationMember> members = conversationMemberRepository.findByConversationId(conversation.getId());
+        for (ConversationMember member : members) {
+            messagingTemplate.convertAndSend("/topic/users/" + member.getUser().getId() + "/messages", response);
+        }
 
         return response;
     }
 
-    public List<MessageResponse> getMessages(Long conversationId) {
-        return messageRepository.findByConversationIdOrderByCreatedAtAsc(conversationId)
+    // CHUYỂN TIẾP TIN NHẮN (FORWARD MESSAGE)
+    public List<MessageResponse> forwardMessage(ForwardMessageRequest request) {
+        Message originalMessage = messageRepository.findById(request.getMessageId())
+                .orElseThrow(() -> new RuntimeException("Tin nhắn không tồn tại"));
+
+        if (Boolean.TRUE.equals(originalMessage.getIsDeleted())) {
+            throw new RuntimeException("Không thể chuyển tiếp tin nhắn đã bị thu hồi");
+        }
+
+        User sender = userRepository.findById(request.getSenderId())
+                .orElseThrow(() -> new RuntimeException("Người gửi không tồn tại"));
+
+        List<MessageResponse> result = new ArrayList<>();
+
+        for (Long targetConvId : request.getTargetConversationIds()) {
+            Conversation targetConv = conversationRepository.findById(targetConvId).orElse(null);
+            if (targetConv == null) continue;
+
+            Message forwardedMsg = Message.builder()
+                    .conversation(targetConv)
+                    .sender(sender)
+                    .content(originalMessage.getContent())
+                    .messageType(originalMessage.getMessageType())
+                    .mediaUrl(originalMessage.getMediaUrl())
+                    .fileName(originalMessage.getFileName())
+                    .fileSize(originalMessage.getFileSize())
+                    .isEdited(false)
+                    .isDeleted(false)
+                    .isPinned(false)
+                    .reactions(new ArrayList<>())
+                    .build();
+
+            Message saved = messageRepository.save(forwardedMsg);
+            MessageResponse res = mapToMessageResponse(saved);
+            result.add(res);
+
+            messagingTemplate.convertAndSend("/topic/conversations/" + targetConv.getId(), res);
+
+            List<ConversationMember> members = conversationMemberRepository.findByConversationId(targetConv.getId());
+            for (ConversationMember m : members) {
+                messagingTemplate.convertAndSend("/topic/users/" + m.getUser().getId() + "/messages", res);
+            }
+        }
+
+        return result;
+    }
+
+    // KHO LƯU TRỮ MEDIA & TỆP (MEDIA GALLERY)
+    @Transactional(readOnly = true)
+    public List<MessageResponse> getConversationMedia(Long conversationId) {
+        List<MessageType> mediaTypes = List.of(MessageType.IMAGE, MessageType.FILE);
+        return messageRepository.findByConversationIdAndMessageTypeInAndIsDeletedFalseOrderByCreatedAtDesc(conversationId, mediaTypes)
                 .stream()
-                .map(msg -> MessageResponse.builder()
-                        .id(msg.getId())
-                        .conversationId(msg.getConversation().getId())
-                        .senderId(msg.getSender().getId())
-                        .senderName(msg.getSender().getDisplayName())
-                        .content(msg.getContent())
-                        .createdAt(msg.getCreatedAt())
-                        .build())
+                .map(this::mapToMessageResponse)
                 .collect(Collectors.toList());
     }
 
+    public MessageResponse togglePinMessage(Long messageId, Long userId) {
+        Message message = messageRepository.findById(messageId)
+                .orElseThrow(() -> new RuntimeException("Tin nhắn không tồn tại"));
+
+        if (Boolean.TRUE.equals(message.getIsDeleted())) {
+            throw new RuntimeException("Không thể ghim tin nhắn đã bị thu hồi");
+        }
+
+        boolean currentPinState = Boolean.TRUE.equals(message.getIsPinned());
+        message.setIsPinned(!currentPinState);
+        Message saved = messageRepository.save(message);
+
+        MessageResponse response = mapToMessageResponse(saved);
+        messagingTemplate.convertAndSend("/topic/conversations/" + message.getConversation().getId() + "/update", response);
+
+        return response;
+    }
+
+    @Transactional(readOnly = true)
+    public List<MessageResponse> getPinnedMessages(Long conversationId) {
+        return messageRepository.findByConversationIdAndIsPinnedTrueOrderByCreatedAtDesc(conversationId)
+                .stream()
+                .map(this::mapToMessageResponse)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<MessageResponse> searchMessages(Long conversationId, String query) {
+        if (query == null || query.trim().isEmpty()) {
+            return List.of();
+        }
+        return messageRepository.searchMessages(conversationId, query.trim())
+                .stream()
+                .map(this::mapToMessageResponse)
+                .collect(Collectors.toList());
+    }
+
+    private void sendSystemMessage(Conversation conv, User sender, String content) {
+        Message systemMsg = Message.builder()
+                .conversation(conv)
+                .sender(sender)
+                .content(content)
+                .messageType(MessageType.SYSTEM)
+                .isEdited(false)
+                .isDeleted(false)
+                .isPinned(false)
+                .build();
+        Message saved = messageRepository.save(systemMsg);
+        MessageResponse response = mapToMessageResponse(saved);
+
+        messagingTemplate.convertAndSend("/topic/conversations/" + conv.getId(), response);
+
+        List<ConversationMember> members = conversationMemberRepository.findByConversationId(conv.getId());
+        for (ConversationMember m : members) {
+            messagingTemplate.convertAndSend("/topic/users/" + m.getUser().getId() + "/messages", response);
+        }
+    }
+
+    private Conversation getGroupConversation(Long convId) {
+        Conversation conv = conversationRepository.findById(convId)
+                .orElseThrow(() -> new RuntimeException("Phòng trò chuyện không tồn tại"));
+        if (conv.getType() != null && conv.getType() != ConversationType.GROUP) {
+            throw new RuntimeException("Cuộc trò chuyện này không phải là nhóm");
+        }
+        return conv;
+    }
+
+    private void validateGroupMembership(Long convId, Long userId) {
+        conversationMemberRepository.findByConversationIdAndUserId(convId, userId)
+                .orElseThrow(() -> new RuntimeException("Bạn không phải là thành viên trong nhóm này"));
+    }
+
+    public MessageResponse editMessage(EditMessageRequest request) {
+        Message message = messageRepository.findById(request.getMessageId())
+                .orElseThrow(() -> new RuntimeException("Tin nhắn không tồn tại"));
+
+        if (!message.getSender().getId().equals(request.getSenderId())) {
+            throw new RuntimeException("Bạn chỉ có thể chỉnh sửa tin nhắn của chính mình");
+        }
+
+        if (Boolean.TRUE.equals(message.getIsDeleted())) {
+            throw new RuntimeException("Không thể chỉnh sửa tin nhắn đã bị thu hồi");
+        }
+
+        message.setContent(request.getContent());
+        message.setIsEdited(true);
+        Message saved = messageRepository.save(message);
+
+        MessageResponse response = mapToMessageResponse(saved);
+        messagingTemplate.convertAndSend("/topic/conversations/" + message.getConversation().getId() + "/update", response);
+
+        return response;
+    }
+
+    public MessageResponse deleteMessage(Long messageId, Long senderId) {
+        Message message = messageRepository.findById(messageId)
+                .orElseThrow(() -> new RuntimeException("Tin nhắn không tồn tại"));
+
+        if (!message.getSender().getId().equals(senderId)) {
+            throw new RuntimeException("Bạn chỉ có thể thu hồi tin nhắn của chính mình");
+        }
+
+        message.setIsDeleted(true);
+        message.setContent("Tin nhắn đã bị thu hồi");
+        message.setMediaUrl(null);
+        message.setFileName(null);
+        message.setFileSize(null);
+        message.setIsPinned(false);
+        message.setMessageType(MessageType.TEXT);
+        if (message.getReactions() != null) {
+            message.getReactions().clear();
+        }
+        Message saved = messageRepository.save(message);
+
+        MessageResponse response = mapToMessageResponse(saved);
+        messagingTemplate.convertAndSend("/topic/conversations/" + message.getConversation().getId() + "/update", response);
+
+        return response;
+    }
+
+    public MessageResponse toggleReaction(ReactionRequest request) {
+        Message message = messageRepository.findById(request.getMessageId())
+                .orElseThrow(() -> new RuntimeException("Tin nhắn không tồn tại"));
+
+        if (Boolean.TRUE.equals(message.getIsDeleted())) {
+            throw new RuntimeException("Không thể thả cảm xúc trên tin nhắn đã thu hồi");
+        }
+
+        User user = userRepository.findById(request.getUserId())
+                .orElseThrow(() -> new RuntimeException("User không tồn tại"));
+
+        Optional<MessageReaction> existing = messageReactionRepository.findByMessageIdAndUserId(message.getId(), user.getId());
+
+        if (existing.isPresent()) {
+            MessageReaction currentReaction = existing.get();
+            if (currentReaction.getReaction().equals(request.getReaction())) {
+                message.getReactions().remove(currentReaction);
+                messageReactionRepository.delete(currentReaction);
+            } else {
+                currentReaction.setReaction(request.getReaction());
+                messageReactionRepository.save(currentReaction);
+            }
+        } else {
+            MessageReaction newReaction = MessageReaction.builder()
+                    .message(message)
+                    .user(user)
+                    .reaction(request.getReaction())
+                    .build();
+            if (message.getReactions() == null) {
+                message.setReactions(new ArrayList<>());
+            }
+            message.getReactions().add(newReaction);
+            messageReactionRepository.save(newReaction);
+        }
+
+        Message updatedMessage = messageRepository.save(message);
+        MessageResponse response = mapToMessageResponse(updatedMessage);
+
+        messagingTemplate.convertAndSend("/topic/conversations/" + message.getConversation().getId() + "/update", response);
+        return response;
+    }
+
+    public void sendTypingEvent(TypingRequest request) {
+        messagingTemplate.convertAndSend("/topic/conversations/" + request.getConversationId() + "/typing", request);
+    }
+
+    public void markConversationAsRead(Long conversationId, Long userId) {
+        conversationMemberRepository.findByConversationIdAndUserId(conversationId, userId)
+                .ifPresent(member -> {
+                    member.setLastReadAt(LocalDateTime.now());
+                    conversationMemberRepository.save(member);
+                });
+    }
+
+    @Transactional(readOnly = true)
+    public List<MessageResponse> getMessages(Long conversationId) {
+        List<Message> messageList = messageRepository.findByConversationIdOrderByCreatedAtAsc(conversationId);
+        List<MessageResponse> responses = new ArrayList<>();
+        for (Message msg : messageList) {
+            responses.add(mapToMessageResponse(msg));
+        }
+        return responses;
+    }
+
+    @Transactional(readOnly = true)
     public List<ConversationResponse> getUserConversations(Long currentUserId) {
         List<ConversationMember> memberships = conversationMemberRepository.findByUserId(currentUserId);
         List<ConversationResponse> responses = new ArrayList<>();
 
         for (ConversationMember member : memberships) {
             Conversation conv = member.getConversation();
-            
-            // Tìm đối phương trong phòng chat 1-1
+            if (conv == null) continue;
+
             List<ConversationMember> allMembers = conversationMemberRepository.findByConversationId(conv.getId());
-            Optional<User> otherUserOpt = allMembers.stream()
-                    .map(ConversationMember::getUser)
-                    .filter(u -> !u.getId().equals(currentUserId))
-                    .findFirst();
+            User otherUser = null;
+            String convTitle = conv.getTitle();
+            String convAvatar = conv.getAvatarUrl();
 
-            if (otherUserOpt.isEmpty()) continue;
-            User otherUser = otherUserOpt.get();
+            ConversationType convType = conv.getType() != null ? conv.getType() : ConversationType.DIRECT;
 
-            // Tìm tin nhắn gần nhất
-            Optional<Message> latestMsg = messageRepository.findTopByConversationIdOrderByCreatedAtDesc(conv.getId());
+            if (convType == ConversationType.DIRECT) {
+                for (ConversationMember m : allMembers) {
+                    if (m.getUser() != null && !m.getUser().getId().equals(currentUserId)) {
+                        otherUser = m.getUser();
+                        break;
+                    }
+                }
+                if (otherUser == null) continue;
+                convTitle = otherUser.getDisplayName();
+                convAvatar = otherUser.getAvatarUrl();
+            }
 
-            String lastMessage = latestMsg.map(Message::getContent).orElse("Chưa có tin nhắn nào");
-            LocalDateTime lastMessageTime = latestMsg.map(Message::getCreatedAt).orElse(conv.getCreatedAt());
+            List<Message> recent = messageRepository.findByConversationIdOrderByCreatedAtDesc(conv.getId());
+            String lastMessage = "Bắt đầu cuộc trò chuyện mới";
+            LocalDateTime lastMessageTime = conv.getCreatedAt() != null ? conv.getCreatedAt() : LocalDateTime.now();
+
+            if (!recent.isEmpty()) {
+                Message latest = recent.get(0);
+                String senderPrefix = (convType == ConversationType.GROUP && latest.getMessageType() != MessageType.SYSTEM)
+                        ? (latest.getSender() != null ? latest.getSender().getDisplayName() + ": " : "")
+                        : "";
+
+                if (Boolean.TRUE.equals(latest.getIsDeleted())) {
+                    lastMessage = "Tin nhắn đã bị thu hồi";
+                } else if (latest.getMessageType() == MessageType.SYSTEM) {
+                    lastMessage = latest.getContent();
+                } else if (latest.getMessageType() == MessageType.IMAGE) {
+                    lastMessage = senderPrefix + "[Hình ảnh]";
+                } else if (latest.getMessageType() == MessageType.FILE) {
+                    lastMessage = senderPrefix + "[Tệp đính kèm] " + (latest.getFileName() != null ? latest.getFileName() : "");
+                } else if (latest.getContent() != null && !latest.getContent().trim().isEmpty()) {
+                    lastMessage = senderPrefix + latest.getContent();
+                }
+                if (latest.getCreatedAt() != null) {
+                    lastMessageTime = latest.getCreatedAt();
+                }
+            }
+
+            long unreadCount = 0;
+            if (member.getLastReadAt() == null) {
+                unreadCount = messageRepository.countTotalUnread(conv.getId(), currentUserId);
+            } else {
+                unreadCount = messageRepository.countUnreadAfter(conv.getId(), currentUserId, member.getLastReadAt());
+            }
+
+            UserResponse otherUserRes = (otherUser != null) ? UserResponse.builder()
+                    .id(otherUser.getId())
+                    .username(otherUser.getUsername())
+                    .displayName(otherUser.getDisplayName())
+                    .avatarUrl(otherUser.getAvatarUrl())
+                    .createdAt(otherUser.getCreatedAt())
+                    .build() : null;
 
             responses.add(ConversationResponse.builder()
                     .conversationId(conv.getId())
-                    .otherUser(UserResponse.builder()
-                            .id(otherUser.getId())
-                            .username(otherUser.getUsername())
-                            .displayName(otherUser.getDisplayName())
-                            .avatarUrl(otherUser.getAvatarUrl())
-                            .createdAt(otherUser.getCreatedAt())
-                            .build())
+                    .type(convType)
+                    .title(convTitle)
+                    .avatarUrl(convAvatar)
+                    .theme(conv.getTheme() != null ? conv.getTheme() : "blue")
+                    .memberCount(allMembers.size())
+                    .otherUser(otherUserRes)
                     .lastMessage(lastMessage)
                     .lastMessageTime(lastMessageTime)
+                    .unreadCount(unreadCount)
                     .build());
         }
 
-        // Sắp xếp cuộc trò chuyện có tin nhắn mới nhất lên đầu danh sách
-        responses.sort(Comparator.comparing(ConversationResponse::getLastMessageTime, Comparator.nullsLast(Comparator.naturalOrder())).reversed());
+        responses.sort((a, b) -> {
+            if (a.getLastMessageTime() == null && b.getLastMessageTime() == null) return 0;
+            if (a.getLastMessageTime() == null) return 1;
+            if (b.getLastMessageTime() == null) return -1;
+            return b.getLastMessageTime().compareTo(a.getLastMessageTime());
+        });
 
         return responses;
+    }
+
+    private MessageResponse mapToMessageResponse(Message msg) {
+        ReplyPreviewResponse replyPreview = null;
+        if (msg.getReplyTo() != null) {
+            String replyContent = "Tin nhắn";
+            if (Boolean.TRUE.equals(msg.getReplyTo().getIsDeleted())) {
+                replyContent = "Tin nhắn đã bị thu hồi";
+            } else if (msg.getReplyTo().getMessageType() == MessageType.IMAGE) {
+                replyContent = "[Hình ảnh]";
+            } else if (msg.getReplyTo().getMessageType() == MessageType.FILE) {
+                replyContent = "[Tệp] " + (msg.getReplyTo().getFileName() != null ? msg.getReplyTo().getFileName() : "");
+            } else if (msg.getReplyTo().getContent() != null) {
+                replyContent = msg.getReplyTo().getContent();
+            }
+
+            Long replySenderId = msg.getReplyTo().getSender() != null ? msg.getReplyTo().getSender().getId() : null;
+            String replySenderName = msg.getReplyTo().getSender() != null ? msg.getReplyTo().getSender().getDisplayName() : "Người dùng";
+
+            replyPreview = ReplyPreviewResponse.builder()
+                    .messageId(msg.getReplyTo().getId())
+                    .senderId(replySenderId)
+                    .senderName(replySenderName)
+                    .content(replyContent)
+                    .build();
+        }
+
+        List<ReactionResponse> reactionResponses = new ArrayList<>();
+        if (msg.getReactions() != null) {
+            for (MessageReaction r : msg.getReactions()) {
+                reactionResponses.add(ReactionResponse.builder()
+                        .id(r.getId())
+                        .userId(r.getUser().getId())
+                        .userName(r.getUser().getDisplayName())
+                        .reaction(r.getReaction())
+                        .build());
+            }
+        }
+
+        return MessageResponse.builder()
+                .id(msg.getId())
+                .conversationId(msg.getConversation().getId())
+                .senderId(msg.getSender() != null ? msg.getSender().getId() : null)
+                .senderName(msg.getSender() != null ? msg.getSender().getDisplayName() : "Hệ thống")
+                .content(msg.getContent())
+                .messageType(msg.getMessageType())
+                .mediaUrl(msg.getMediaUrl())
+                .fileName(msg.getFileName())
+                .fileSize(msg.getFileSize())
+                .isEdited(Boolean.TRUE.equals(msg.getIsEdited()))
+                .isDeleted(Boolean.TRUE.equals(msg.getIsDeleted()))
+                .isPinned(Boolean.TRUE.equals(msg.getIsPinned()))
+                .replyTo(replyPreview)
+                .reactions(reactionResponses)
+                .createdAt(msg.getCreatedAt())
+                .build();
     }
 }

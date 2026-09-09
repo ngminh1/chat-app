@@ -9,14 +9,11 @@ import java.util.List;
 import java.util.Optional;
 
 public interface UserRepository extends JpaRepository<User, Long> {
+
     Optional<User> findByUsername(String username);
+
     boolean existsByUsername(String username);
 
-    @Query("""
-        SELECT u FROM User u 
-        WHERE (LOWER(u.username) LIKE LOWER(CONCAT('%', :query, '%')) 
-           OR LOWER(u.displayName) LIKE LOWER(CONCAT('%', :query, '%')))
-          AND u.id != :currentUserId
-    """)
+    @Query("SELECT u FROM User u WHERE (LOWER(u.username) LIKE LOWER(CONCAT('%', :query, '%')) OR LOWER(u.displayName) LIKE LOWER(CONCAT('%', :query, '%'))) AND u.id <> :currentUserId")
     List<User> searchUsers(@Param("query") String query, @Param("currentUserId") Long currentUserId);
 }
