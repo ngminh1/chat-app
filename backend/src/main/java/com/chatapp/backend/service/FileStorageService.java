@@ -2,11 +2,14 @@ package com.chatapp.backend.service;
 
 import com.chatapp.backend.dto.FileUploadResponse;
 import com.chatapp.backend.entity.MessageType;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
+import java.io.IOException; // <--- Thêm import này vào
+import java.net.MalformedURLException;
 import java.nio.file.*;
 import java.util.Objects;
 import java.util.UUID;
@@ -49,7 +52,7 @@ public class FileStorageService {
                 messageType = MessageType.IMAGE;
             }
 
-            String fileDownloadUri = "/uploads/" + uniqueFileName;
+            String fileDownloadUri = "/api/media/files/" + uniqueFileName;
 
             return FileUploadResponse.builder()
                     .fileUrl(fileDownloadUri)
@@ -60,6 +63,20 @@ public class FileStorageService {
 
         } catch (IOException ex) {
             throw new RuntimeException("Không thể lưu file " + originalFileName, ex);
+        }
+    }
+
+    public Resource loadFileAsResource(String fileName) {
+        try {
+            Path filePath = this.fileStorageLocation.resolve(fileName).normalize();
+            Resource resource = new UrlResource(filePath.toUri());
+            if (resource.exists()) {
+                return resource;
+            } else {
+                throw new RuntimeException("Không tìm thấy tệp tin: " + fileName);
+            }
+        } catch (MalformedURLException ex) {
+            throw new RuntimeException("Không tìm thấy tệp tin: " + fileName, ex);
         }
     }
 }
