@@ -49,7 +49,7 @@ public class FileStorageService {
                 messageType = MessageType.IMAGE;
             }
 
-            String fileDownloadUri = "http://localhost:8080/uploads/" + uniqueFileName;
+            String fileDownloadUri = "/uploads/" + uniqueFileName;
 
             return FileUploadResponse.builder()
                     .fileUrl(fileDownloadUri)
