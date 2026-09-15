@@ -38,6 +38,8 @@ export default function GroupDetailModal({
   const [selectedTheme, setSelectedTheme] = useState('blue');
 
   const isGroup = conversation?.type === 'GROUP';
+  const targetAvatarUrl = conversation?.avatarUrl || conversation?.otherUser?.avatarUrl;
+  const targetTitle = conversation?.title || conversation?.otherUser?.displayName || 'U';
 
   const fetchMembers = async () => {
     if (!conversation) return;
@@ -173,29 +175,45 @@ export default function GroupDetailModal({
   );
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
-      <div className={`w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-150 ${
-        isDarkMode ? 'bg-slate-900 text-slate-100' : 'bg-white text-slate-900'
-      }`}>
+    <div
+      onClick={onClose}
+      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-xs select-none"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={`w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-150 border ${
+          isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
+        }`}
+      >
+        {/* Header */}
         <div className={`px-5 py-4 border-b flex items-center justify-between ${
           isDarkMode ? 'bg-slate-800/50 border-slate-800' : 'bg-slate-50/50 border-slate-200'
         }`}>
-          <h2 className="text-base font-bold flex items-center gap-2">
-            <Users className="w-4 h-4 text-[#0084FF]" />
+          <h2 className="text-sm font-bold flex items-center gap-2">
+            <Users className="w-4 h-4 text-[#0062FF]" />
             {isGroup ? 'Thông tin nhóm' : 'Thông tin cuộc trò chuyện'}
           </h2>
-          <button onClick={onClose} className="p-1.5 rounded-full text-slate-400 hover:text-slate-600">
+          <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5 space-y-6">
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {/* Avatar & Tên hội thoại */}
           <div className="flex flex-col items-center text-center">
-            <div className={`w-20 h-20 rounded-full text-white flex items-center justify-center font-bold text-2xl shadow-md mb-3 ${
-              isGroup ? 'bg-gradient-to-tr from-purple-600 to-indigo-500' : 'bg-gradient-to-tr from-blue-600 to-sky-400'
-            }`}>
-              {(conversation.title || conversation.otherUser?.displayName || 'U').charAt(0).toUpperCase()}
-            </div>
+            {targetAvatarUrl ? (
+              <img
+                src={targetAvatarUrl}
+                alt=""
+                className="w-16 h-16 rounded-full object-cover border border-slate-200 dark:border-slate-700 shadow-xs mb-2.5 flex-shrink-0"
+              />
+            ) : (
+              <div className={`w-16 h-16 rounded-full text-white flex items-center justify-center font-bold text-xl shadow-xs mb-2.5 flex-shrink-0 ${
+                isGroup ? 'bg-gradient-to-tr from-purple-600 to-indigo-500' : 'bg-gradient-to-tr from-[#0062FF] to-sky-400'
+              }`}>
+                {targetTitle.charAt(0).toUpperCase()}
+              </div>
+            )}
 
             {isGroup ? (
               isEditingTitle ? (
@@ -204,32 +222,33 @@ export default function GroupDetailModal({
                     type="text"
                     value={newTitle}
                     onChange={(e) => setNewTitle(e.target.value)}
-                    className="flex-1 px-3 py-1.5 text-sm font-semibold border rounded-lg focus:outline-none dark:bg-slate-800 dark:border-slate-700"
+                    className="flex-1 px-3 py-1.5 text-xs font-semibold border rounded-lg focus:outline-none dark:bg-slate-800 dark:border-slate-700"
                     autoFocus
                   />
-                  <button onClick={handleUpdateTitle} disabled={actionLoading} className="p-2 bg-[#0084FF] text-white rounded-lg">
+                  <button onClick={handleUpdateTitle} disabled={actionLoading} className="p-1.5 bg-[#0062FF] text-white rounded-lg cursor-pointer">
                     <Check className="w-4 h-4" />
                   </button>
-                  <button onClick={() => setIsEditingTitle(false)} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-lg">
+                  <button onClick={() => setIsEditingTitle(false)} className="p-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg cursor-pointer">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
               ) : (
                 <div className="flex items-center gap-2">
-                  <h3 className="text-lg font-bold">{conversation.title}</h3>
-                  <button onClick={() => setIsEditingTitle(true)} className="p-1 text-slate-400 hover:text-[#0084FF]">
+                  <h3 className="text-base font-bold">{conversation.title}</h3>
+                  <button onClick={() => setIsEditingTitle(true)} className="p-1 text-slate-400 hover:text-[#0062FF] cursor-pointer">
                     <Edit2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               )
             ) : (
               <div>
-                <h3 className="text-lg font-bold">{conversation.otherUser?.displayName}</h3>
-                <p className="text-xs text-slate-400">@{conversation.otherUser?.username}</p>
+                <h3 className="text-base font-bold">{conversation.otherUser?.displayName}</h3>
+                <p className="text-xs text-slate-400 mt-0.5">@{conversation.otherUser?.username}</p>
               </div>
             )}
           </div>
 
+          {/* Nút vào kho Media */}
           <button
             onClick={() => {
               onClose();
@@ -240,15 +259,16 @@ export default function GroupDetailModal({
             }`}
           >
             <span className="flex items-center gap-2">
-              <FolderOpen className="w-4 h-4 text-[#0084FF]" />
+              <FolderOpen className="w-4 h-4 text-[#0062FF]" />
               Kho lưu trữ hình ảnh & tệp đính kèm
             </span>
-            <span className="text-[#0084FF]">Xem tất cả →</span>
+            <span className="text-[#0062FF]">Xem tất cả →</span>
           </button>
 
+          {/* Đổi màu chủ đề */}
           <div className="space-y-2">
             <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-              <Palette className="w-3.5 h-3.5" /> Chủ đề đoạn chat (Theme)
+              <Palette className="w-3.5 h-3.5" /> Chủ đề cuộc trò chuyện (Theme)
             </h4>
             <div className="grid grid-cols-5 gap-2 pt-1">
               {Object.values(CHAT_THEMES).map((theme) => {
@@ -260,12 +280,12 @@ export default function GroupDetailModal({
                     onClick={() => handleChangeTheme(theme.id)}
                     className={`flex flex-col items-center gap-1.5 p-2 rounded-xl transition-all cursor-pointer border ${
                       isSelected
-                        ? 'border-[#0084FF] bg-blue-50/40 dark:bg-blue-950/40 ring-2 ring-[#0084FF] shadow-sm'
+                        ? 'border-[#0062FF] bg-blue-50/40 dark:bg-blue-950/40 ring-2 ring-[#0062FF] shadow-xs'
                         : 'border-transparent hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                   >
                     <span
-                      className="w-8 h-8 rounded-full shadow-sm transition-transform hover:scale-110 flex items-center justify-center text-white"
+                      className="w-8 h-8 rounded-full shadow-xs transition-transform hover:scale-110 flex items-center justify-center text-white"
                       style={{ backgroundColor: theme.colorCode }}
                     >
                       {isSelected && <Check className="w-4 h-4 stroke-[3]" />}
@@ -279,6 +299,7 @@ export default function GroupDetailModal({
             </div>
           </div>
 
+          {/* Quản lý thành viên nếu là nhóm */}
           {isGroup && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -287,7 +308,7 @@ export default function GroupDetailModal({
                 </h4>
                 <button
                   onClick={() => setIsAddingMember(!isAddingMember)}
-                  className="text-xs font-semibold text-[#0084FF] flex items-center gap-1 hover:underline"
+                  className="text-xs font-semibold text-[#0062FF] flex items-center gap-1 hover:underline cursor-pointer"
                 >
                   <UserPlus className="w-3.5 h-3.5" /> Thêm thành viên
                 </button>
@@ -304,7 +325,7 @@ export default function GroupDetailModal({
                       placeholder="Tìm bạn bè..."
                       value={friendSearch}
                       onChange={(e) => setFriendSearch(e.target.value)}
-                      className={`w-full pl-7 pr-3 py-1 rounded-lg text-xs focus:outline-none ${
+                      className={`w-full pl-7 pr-3 py-1.5 rounded-lg text-xs focus:outline-none ${
                         isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
                       }`}
                     />
@@ -325,7 +346,7 @@ export default function GroupDetailModal({
                           <button
                             onClick={() => handleAddMember(f.user.id)}
                             disabled={actionLoading}
-                            className="px-2.5 py-1 bg-[#0084FF] text-white text-[11px] font-semibold rounded-lg"
+                            className="px-2.5 py-1 bg-[#0062FF] text-white text-[11px] font-semibold rounded-lg cursor-pointer"
                           >
                             Thêm
                           </button>
@@ -341,7 +362,7 @@ export default function GroupDetailModal({
               }`}>
                 {loading ? (
                   <div className="text-center py-6 text-xs text-slate-400">
-                    <Loader2 className="w-4 h-4 animate-spin text-[#0084FF] mx-auto mb-1" />
+                    <Loader2 className="w-4 h-4 animate-spin text-[#0062FF] mx-auto mb-1" />
                     Đang tải danh sách...
                   </div>
                 ) : (
@@ -349,18 +370,18 @@ export default function GroupDetailModal({
                     <div key={m.userId} className="p-2.5 flex items-center justify-between rounded-lg">
                       <div className="flex items-center gap-2.5 min-w-0">
                         {m.avatarUrl ? (
-                          <img src={m.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover" />
+                          <img src={m.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
                         ) : (
-                          <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center font-bold text-xs">
+                          <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center font-bold text-xs flex-shrink-0">
                             {m.displayName.charAt(0).toUpperCase()}
                           </div>
                         )}
                         <div className="truncate">
                           <div className="flex items-center gap-1.5">
-                            <span className="text-sm font-semibold truncate">{m.displayName}</span>
+                            <span className="text-xs font-semibold truncate">{m.displayName}</span>
                             {m.role === 'ADMIN' && (
-                              <span className="px-1.5 py-0.5 bg-blue-100 text-[#0084FF] text-[9px] font-bold rounded flex items-center gap-0.5">
-                                <Shield className="w-2.5 h-2.5" /> Admin
+                              <span className="px-1.5 py-0.5 bg-blue-100 text-[#0062FF] text-[9px] font-bold rounded flex items-center gap-0.5">
+                                <Shield className="w-2.5 h-2.5" /> Quản trị viên
                               </span>
                             )}
                           </div>
@@ -372,7 +393,8 @@ export default function GroupDetailModal({
                         <button
                           onClick={() => handleRemoveMember(m.userId, m.displayName)}
                           disabled={actionLoading}
-                          className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg"
+                          className="p-1.5 text-slate-400 hover:text-rose-500 rounded-lg cursor-pointer"
+                          title="Xóa khỏi nhóm"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -389,7 +411,7 @@ export default function GroupDetailModal({
               <button
                 onClick={handleLeaveGroup}
                 disabled={actionLoading}
-                className="w-full py-2.5 text-red-500 bg-red-500/10 hover:bg-red-500/20 font-semibold text-sm rounded-xl transition-colors flex items-center justify-center gap-2"
+                className="w-full py-2.5 text-rose-600 bg-rose-500/10 hover:bg-rose-500/20 font-semibold text-xs rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer"
               >
                 <LogOut className="w-4 h-4" /> Rời khỏi nhóm
               </button>

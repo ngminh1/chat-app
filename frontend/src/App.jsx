@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
+import { Loader2, AlertCircle } from 'lucide-react';
 
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
@@ -31,6 +32,8 @@ export default function App() {
     return localStorage.getItem('dark_mode') === 'true';
   });
 
+  const [isReconnecting, setIsReconnecting] = useState(false);
+
   const [conversations, setConversations] = useState([]);
   const [isLoadingConversations, setIsLoadingConversations] = useState(false);
   const [activeConv, setActiveConv] = useState(null);
@@ -51,7 +54,19 @@ export default function App() {
       : { soundEnabled: true, desktopNotifications: true, inAppToast: true };
   });
 
+  // Lưu settings vào ref để callback WebSocket đọc trực tiếp mà không cần khởi tạo lại socket
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+
   const [activeToast, setActiveToast] = useState(null);
+
+  // Hộp thoại xác nhận (Custom Confirm Modal thay window.confirm)
+  const [confirmDialog, setConfirmDialog] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: null
+  });
 
   // Modals
   const [isFriendsModalOpen, setIsFriendsModalOpen] = useState(false);
@@ -136,10 +151,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (currentUser) {
+    if (currentUser?.id) {
       fetchConversations(currentUser.id);
     }
-  }, [currentUser]);
+  }, [currentUser?.id]);
 
   const handleSelectConversation = async (conv) => {
     setActiveConv(conv);
@@ -172,14 +187,17 @@ export default function App() {
       .finally(() => setIsLoadingMessages(false));
   }, [activeConv?.conversationId]);
 
+  // WebSocket Connection: Tách hoàn toàn settings khỏi deps
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser?.id) return;
 
     const client = new Client({
       webSocketFactory: () => new SockJS(WS_URL),
       debug: () => {},
       reconnectDelay: 5000,
       onConnect: () => {
+        setIsReconnecting(false);
+
         axios.put(`${API_BASE}/chat/presence`, null, {
           params: { userId: currentUser.id, isOnline: true }
         }).catch(() => {});
@@ -197,11 +215,12 @@ export default function App() {
           const currentActive = activeConvRef.current;
           const isCurrentlyActiveRoom = currentActive && currentActive.conversationId === newMsg.conversationId;
           const isSentByMe = newMsg.senderId === currentUser.id;
+          const currentSettings = settingsRef.current;
 
           if (!isSentByMe) {
-            if (settings.soundEnabled) soundManager.playIncomingMessageSound();
+            if (currentSettings.soundEnabled) soundManager.playIncomingMessageSound();
 
-            if (settings.desktopNotifications && document.hidden) {
+            if (currentSettings.desktopNotifications && document.hidden) {
               let bodyPreview = newMsg.content;
               if (newMsg.messageType === 'IMAGE') bodyPreview = 'Đã gửi một hình ảnh';
               if (newMsg.messageType === 'FILE') bodyPreview = `Đã gửi tệp: ${newMsg.fileName || ''}`;
@@ -212,7 +231,7 @@ export default function App() {
               });
             }
 
-            if (settings.inAppToast && !isCurrentlyActiveRoom) {
+            if (currentSettings.inAppToast && !isCurrentlyActiveRoom) {
               const matchedConv = conversationsRef.current.find((c) => c.conversationId === newMsg.conversationId);
               let previewContent = newMsg.content;
               if (newMsg.messageType === 'IMAGE') previewContent = '📷 [Hình ảnh]';
@@ -238,8 +257,10 @@ export default function App() {
 
           if (isCurrentlyActiveRoom) {
             setMessages((prev) => {
-              if (prev.some((m) => m.id === newMsg.id)) return prev;
-              return [...prev, newMsg];
+              // Loại bỏ tin nhắn tạm thời lạc quan nếu trùng
+              const filtered = prev.filter((m) => !m.isOptimistic || m.content !== newMsg.content);
+              if (filtered.some((m) => m.id === newMsg.id)) return filtered;
+              return [...filtered, newMsg];
             });
             if (!isSentByMe) {
               await axios.put(`${API_BASE}/chat/conversations/${newMsg.conversationId}/read`, null, {
@@ -257,7 +278,7 @@ export default function App() {
 
             let preview = newMsg.content;
             if (newMsg.messageType === 'IMAGE') preview = '[Hình ảnh]';
-            if (newMsg.messageType === 'FILE') preview = `[Tệp đính kèm] ${newMsg.fileName || ''}`;
+            if (newMsg.messageType === 'FILE') preview = `[Tệp] ${newMsg.fileName || ''}`;
 
             const targetConv = { ...prev[existingIndex] };
             targetConv.lastMessage = preview;
@@ -274,6 +295,9 @@ export default function App() {
           });
         });
       },
+      onWebSocketClose: () => setIsReconnecting(true),
+      onWebSocketError: () => setIsReconnecting(true),
+      onStompError: () => setIsReconnecting(true)
     });
 
     client.activate();
@@ -290,61 +314,51 @@ export default function App() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       if (stompClientRef.current) stompClientRef.current.deactivate();
     };
-  }, [currentUser, settings]);
+  }, [currentUser?.id]);
 
+  // Subscribe kênh của active conversation: Thay polling 200ms bằng listener trực tiếp
   useEffect(() => {
-    if (!activeConv || !stompClientRef.current) return;
+    const convId = activeConv?.conversationId;
+    if (!convId || !stompClientRef.current) return;
 
     let updateSub = null;
     let typingSub = null;
     let themeSub = null;
 
-    const interval = setInterval(() => {
-      if (stompClientRef.current && stompClientRef.current.connected) {
-        clearInterval(interval);
+    const client = stompClientRef.current;
+    if (client.connected) {
+      updateSub = client.subscribe(`/topic/conversations/${convId}/update`, (msgFrame) => {
+        const updatedMsg = JSON.parse(msgFrame.body);
+        setMessages((prev) => prev.map((m) => (m.id === updatedMsg.id ? updatedMsg : m)));
+      });
 
-        updateSub = stompClientRef.current.subscribe(
-          `/topic/conversations/${activeConv.conversationId}/update`,
-          (msgFrame) => {
-            const updatedMsg = JSON.parse(msgFrame.body);
-            setMessages((prev) => prev.map((m) => (m.id === updatedMsg.id ? updatedMsg : m)));
-          }
+      typingSub = client.subscribe(`/topic/conversations/${convId}/typing`, (msgFrame) => {
+        const typingData = JSON.parse(msgFrame.body);
+        const isSelf = Number(typingData.userId) === Number(currentUser?.id);
+        const isTypingActive = typingData.isTyping ?? typingData.typing ?? false;
+
+        if (!isSelf) {
+          setTypingUser(isTypingActive ? (typingData.userName || "Người dùng") : null);
+        }
+      });
+
+      themeSub = client.subscribe(`/topic/conversations/${convId}/theme`, (msgFrame) => {
+        const newTheme = msgFrame.body;
+        setActiveConv((prev) => ({ ...prev, theme: newTheme }));
+        setConversations((prev) =>
+          prev.map((c) => (c.conversationId === convId ? { ...c, theme: newTheme } : c))
         );
-
-        typingSub = stompClientRef.current.subscribe(
-          `/topic/conversations/${activeConv.conversationId}/typing`,
-          (msgFrame) => {
-            const typingData = JSON.parse(msgFrame.body);
-            const isSelf = Number(typingData.userId) === Number(currentUser.id);
-            const isTypingActive = typingData.isTyping ?? typingData.typing ?? false;
-
-            if (!isSelf) {
-              setTypingUser(isTypingActive ? (typingData.userName || "Đối phương") : null);
-            }
-          }
-        );
-
-        themeSub = stompClientRef.current.subscribe(
-          `/topic/conversations/${activeConv.conversationId}/theme`,
-          (msgFrame) => {
-            const newTheme = msgFrame.body;
-            setActiveConv((prev) => ({ ...prev, theme: newTheme }));
-            setConversations((prev) =>
-              prev.map((c) => (c.conversationId === activeConv.conversationId ? { ...c, theme: newTheme } : c))
-            );
-          }
-        );
-      }
-    }, 200);
+      });
+    }
 
     return () => {
-      clearInterval(interval);
       if (updateSub) updateSub.unsubscribe();
       if (typingSub) typingSub.unsubscribe();
       if (themeSub) themeSub.unsubscribe();
     };
-  }, [activeConv?.conversationId, currentUser]);
+  }, [activeConv?.conversationId, currentUser?.id]);
 
+  // Gửi tin nhắn: Áp dụng Optimistic UI + Cập nhật hội thoại Local trực tiếp (Không fetch lại server)
   const handleSendMessage = async (
     content,
     replyToId,
@@ -354,6 +368,44 @@ export default function App() {
     fileSize = null
   ) => {
     if (!activeConv) return;
+
+    const tempId = `optimistic-${Date.now()}`;
+    const nowIso = new Date().toISOString();
+
+    const optimisticMsg = {
+      id: tempId,
+      conversationId: activeConv.conversationId,
+      senderId: currentUser.id,
+      senderName: currentUser.displayName,
+      content: content || '',
+      messageType,
+      mediaUrl,
+      fileName,
+      fileSize,
+      isEdited: false,
+      isDeleted: false,
+      isPinned: false,
+      isOptimistic: true,
+      createdAt: nowIso
+    };
+
+    // Đẩy ngay vào danh sách tin nhắn để giao diện phản hồi tức thì
+    setMessages((prev) => [...prev, optimisticMsg]);
+
+    // Cập nhật ngay danh sách hội thoại bên sidebar
+    setConversations((prev) => {
+      const idx = prev.findIndex((c) => c.conversationId === activeConv.conversationId);
+      let preview = content || '';
+      if (messageType === 'IMAGE') preview = '[Hình ảnh]';
+      if (messageType === 'FILE') preview = `[Tệp] ${fileName || ''}`;
+
+      if (idx !== -1) {
+        const target = { ...prev[idx], lastMessage: preview, lastMessageTime: nowIso, unreadCount: 0 };
+        const rest = prev.filter((c) => c.conversationId !== activeConv.conversationId);
+        return [target, ...rest];
+      }
+      return prev;
+    });
 
     try {
       const res = await axios.post(`${API_BASE}/chat/messages`, {
@@ -367,17 +419,18 @@ export default function App() {
         fileSize
       });
 
-      if (settings.soundEnabled) soundManager.playOutgoingMessageSound();
+      if (settingsRef.current.soundEnabled) soundManager.playOutgoingMessageSound();
 
-      const sentMsg = res.data;
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === sentMsg.id)) return prev;
-        return [...prev, sentMsg];
-      });
-      fetchConversations(currentUser.id);
+      const serverMsg = res.data;
+      // Thay thế tin nhắn tạm bằng tin nhắn xác nhận chính thức từ server
+      setMessages((prev) =>
+        prev.map((m) => (m.id === tempId ? serverMsg : m))
+      );
     } catch (err) {
       console.error("Lỗi gửi tin nhắn:", err);
-      alert("Không thể gửi tin nhắn. Vui lòng kiểm tra lại kết nối!");
+      // Xóa tin tạm nếu gửi thất bại
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      throw err;
     }
   };
 
@@ -388,12 +441,20 @@ export default function App() {
         senderId: currentUser.id,
         targetConversationIds: targetConvIds
       });
-      if (settings.soundEnabled) soundManager.playOutgoingMessageSound();
+      if (settingsRef.current.soundEnabled) soundManager.playOutgoingMessageSound();
       fetchConversations(currentUser.id);
-      alert("Chuyển tiếp tin nhắn thành công!");
+      setActiveToast({
+        title: 'Chuyển tiếp thành công',
+        content: `Đã gửi tin nhắn đến ${targetConvIds.length} cuộc trò chuyện.`,
+        conversation: null
+      });
     } catch (err) {
       console.error("Lỗi chuyển tiếp:", err);
-      alert("Có lỗi xảy ra khi chuyển tiếp tin nhắn");
+      setActiveToast({
+        title: 'Lỗi',
+        content: 'Có lỗi xảy ra khi chuyển tiếp tin nhắn.',
+        conversation: null
+      });
     }
   };
 
@@ -411,22 +472,30 @@ export default function App() {
     }
   };
 
-  const handleDeleteMessage = async (messageId) => {
-    if (!window.confirm("Bạn có chắc chắn muốn thu hồi tin nhắn này?")) return;
-    try {
-      const res = await axios.delete(`${API_BASE}/chat/messages/${messageId}`, {
-        params: { senderId: currentUser.id }
-      });
-      const updated = res.data;
-      setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
-    } catch (err) {
-      console.error("Lỗi thu hồi tin nhắn:", err);
-    }
+  const handleDeleteMessage = (messageId) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Thu hồi tin nhắn',
+      message: 'Bạn có chắc chắn muốn thu hồi tin nhắn này đối với mọi người trong phòng chat?',
+      onConfirm: async () => {
+        try {
+          const res = await axios.delete(`${API_BASE}/chat/messages/${messageId}`, {
+            params: { senderId: currentUser.id }
+          });
+          const updated = res.data;
+          setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+        } catch (err) {
+          console.error("Lỗi thu hồi tin nhắn:", err);
+        } finally {
+          setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+        }
+      }
+    });
   };
 
   const handleToggleReaction = async (messageId, reaction) => {
     try {
-      if (settings.soundEnabled) soundManager.playReactionSound();
+      if (settingsRef.current.soundEnabled) soundManager.playReactionSound();
       const res = await axios.post(`${API_BASE}/chat/messages/reaction`, {
         messageId,
         userId: currentUser.id,
@@ -457,7 +526,7 @@ export default function App() {
       await axios.post(`${API_BASE}/chat/typing`, {
         conversationId: activeConv.conversationId,
         userId: currentUser.id,
-        userName: currentUser?.displayName || "User",
+        userName: currentUser?.displayName || "Người dùng",
         isTyping: Boolean(isTyping)
       });
     } catch (err) {
@@ -466,7 +535,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!searchQuery.trim() || !currentUser) {
+    if (!searchQuery.trim() || !currentUser?.id) {
       setSearchResults([]);
       return;
     }
@@ -483,7 +552,7 @@ export default function App() {
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [searchQuery, currentUser]);
+  }, [searchQuery, currentUser?.id]);
 
   const handleStartChatWithUser = async (targetUser) => {
     try {
@@ -519,9 +588,17 @@ export default function App() {
       await axios.post(`${API_BASE}/friends/request`, null, {
         params: { requesterId: currentUser.id, addresseeId }
       });
-      alert("Đã gửi lời mời kết bạn thành công!");
+      setActiveToast({
+        title: 'Thành công',
+        content: 'Đã gửi lời mời kết bạn!',
+        conversation: null
+      });
     } catch (err) {
-      alert(err.response?.data?.message || "Lời mời kết bạn đã tồn tại hoặc đã là bạn bè");
+      setActiveToast({
+        title: 'Thông báo',
+        content: err.response?.data?.message || 'Lời mời kết bạn đã tồn tại hoặc đã là bạn bè.',
+        conversation: null
+      });
     }
   };
 
@@ -565,61 +642,114 @@ export default function App() {
   const pinnedMessages = messages.filter((m) => m.isPinned && !m.isDeleted);
 
   return (
-    <div className={`flex h-[100dvh] w-full font-sans antialiased overflow-hidden select-none ${
+    <div className={`flex flex-col h-[100dvh] w-full font-sans antialiased overflow-hidden select-none ${
       isDarkMode ? 'dark bg-slate-950 text-slate-100' : 'bg-white text-slate-900'
     }`}>
-      <Sidebar
-        currentUser={currentUser}
-        conversations={conversations}
-        activeConvId={activeConv?.conversationId}
-        onSelectConversation={handleSelectConversation}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        searchResults={searchResults}
-        onSelectUserToChat={handleStartChatWithUser}
-        onSendFriendRequest={handleSendFriendRequest}
-        onOpenFriendsModal={() => setIsFriendsModalOpen(true)}
-        onOpenProfileModal={() => setIsProfileModalOpen(true)}
-        onOpenCreateGroupModal={() => setIsCreateGroupModalOpen(true)}
-        isDarkMode={isDarkMode}
-        onToggleDarkMode={handleToggleDarkMode}
-        onLogout={handleLogout}
-        presenceMap={presenceMap}
-        isLoadingConversations={isLoadingConversations}
-      />
-
-      {activeConv ? (
-        <ChatArea
-          activeConversation={activeConv}
-          messages={messages}
-          currentUserId={currentUser.id}
-          currentUserName={currentUser.displayName}
-          onSendMessage={handleSendMessage}
-          onEditMessage={handleEditMessage}
-          onDeleteMessage={handleDeleteMessage}
-          onToggleReaction={handleToggleReaction}
-          onTogglePinMessage={handleTogglePinMessage}
-          onSendTyping={handleSendTyping}
-          typingUser={typingUser}
-          isLoadingMessages={isLoadingMessages}
-          onOpenGroupDetailModal={() => setIsGroupDetailModalOpen(true)}
-          onOpenPinnedModal={() => setIsPinnedModalOpen(true)}
-          onOpenMediaGallery={() => setIsMediaGalleryOpen(true)}
-          onStartForwardMessage={(msg) => setForwardingMessage(msg)}
-          onBack={handleBackToSidebar}
-          isDarkMode={isDarkMode}
-          presenceMap={presenceMap}
-          lastSeenMap={lastSeenMap}
-        />
-      ) : (
-        <EmptyState isDarkMode={isDarkMode} />
+      {/* Banner WebSocket Reconnecting */}
+      {isReconnecting && (
+        <div className="bg-amber-500 text-slate-950 text-xs font-bold py-1 px-4 text-center flex items-center justify-center gap-2 flex-shrink-0 z-50 shadow-xs animate-in fade-in">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          <span>Đang kết nối lại máy chủ...</span>
+        </div>
       )}
+
+      <div className="flex-1 flex overflow-hidden w-full h-full">
+        <Sidebar
+          currentUser={currentUser}
+          conversations={conversations}
+          activeConvId={activeConv?.conversationId}
+          onSelectConversation={handleSelectConversation}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          searchResults={searchResults}
+          onSelectUserToChat={handleStartChatWithUser}
+          onSendFriendRequest={handleSendFriendRequest}
+          onOpenFriendsModal={() => setIsFriendsModalOpen(true)}
+          onOpenProfileModal={() => setIsProfileModalOpen(true)}
+          onOpenCreateGroupModal={() => setIsCreateGroupModalOpen(true)}
+          isDarkMode={isDarkMode}
+          onToggleDarkMode={handleToggleDarkMode}
+          onLogout={handleLogout}
+          presenceMap={presenceMap}
+          isLoadingConversations={isLoadingConversations}
+          onGoHome={handleBackToSidebar}
+        />
+
+        {activeConv ? (
+          <ChatArea
+            activeConversation={activeConv}
+            messages={messages}
+            currentUserId={currentUser.id}
+            currentUserName={currentUser.displayName}
+            onSendMessage={handleSendMessage}
+            onEditMessage={handleEditMessage}
+            onDeleteMessage={handleDeleteMessage}
+            onToggleReaction={handleToggleReaction}
+            onTogglePinMessage={handleTogglePinMessage}
+            onSendTyping={handleSendTyping}
+            typingUser={typingUser}
+            isLoadingMessages={isLoadingMessages}
+            onOpenGroupDetailModal={() => setIsGroupDetailModalOpen(true)}
+            onOpenPinnedModal={() => setIsPinnedModalOpen(true)}
+            onOpenMediaGallery={() => setIsMediaGalleryOpen(true)}
+            onStartForwardMessage={(msg) => setForwardingMessage(msg)}
+            onBack={handleBackToSidebar}
+            isDarkMode={isDarkMode}
+            presenceMap={presenceMap}
+            lastSeenMap={lastSeenMap}
+          />
+        ) : (
+          <EmptyState
+            isDarkMode={isDarkMode}
+            onNewConversation={() => setIsFriendsModalOpen(true)}
+          />
+        )}
+      </div>
 
       <ToastNotification
         toast={activeToast}
         onClose={() => setActiveToast(null)}
         onSelectConversation={handleSelectConversation}
       />
+
+      {/* Hộp thoại xác nhận tùy chỉnh chuẩn phong cách Dispatch */}
+      {confirmDialog.isOpen && (
+        <div
+          onClick={() => setConfirmDialog((prev) => ({ ...prev, isOpen: false }))}
+          className="fixed inset-0 bg-black/60 z-60 flex items-center justify-center p-4 backdrop-blur-xs select-none"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className={`w-full max-w-sm rounded-2xl p-5 border shadow-2xl animate-in zoom-in-95 duration-150 ${
+              isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
+            }`}
+          >
+            <div className="flex items-center gap-2.5 mb-2">
+              <div className="w-8 h-8 rounded-xl bg-rose-500/10 text-rose-500 flex items-center justify-center flex-shrink-0">
+                <AlertCircle className="w-4 h-4" />
+              </div>
+              <h3 className="text-sm font-bold">{confirmDialog.title}</h3>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-5 leading-relaxed">
+              {confirmDialog.message}
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => setConfirmDialog((prev) => ({ ...prev, isOpen: false }))}
+                className="px-3.5 py-1.5 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={confirmDialog.onConfirm}
+                className="px-3.5 py-1.5 text-xs font-semibold text-white rounded-xl bg-rose-600 hover:bg-rose-700 transition-colors shadow-xs cursor-pointer"
+              >
+                Xác nhận
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {activeConv && (
         <MediaGalleryModal

@@ -1,14 +1,14 @@
 version: '3.8'
 
 services:
-  # 1. Cơ sở dữ liệu MySQL 8.0
+  # 1. Cơ sở dữ liệu MySQL 8.0 (khi chạy offline)
   mysql:
     image: mysql:8.0
     container_name: chatapp_mysql
     restart: always
     environment:
       MYSQL_DATABASE: chat_app
-      MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
     ports:
       - "3306:3306"
     volumes:
@@ -26,9 +26,10 @@ services:
     depends_on:
       - mysql
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/chat_app?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
-      SPRING_DATASOURCE_USERNAME: root
-      SPRING_DATASOURCE_PASSWORD: ""
+      DB_URL: ${DB_URL:-jdbc:mysql://mysql:3306/chat_app?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
+      DB_USERNAME: ${DB_USERNAME:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-rootpassword}
+      JWT_SECRET: ${JWT_SECRET:-chatAppDefaultSecretKeyMustBeAtLeast256BitsLongForSecurityLocalOnly}
       FILE_UPLOAD_DIR: /app/uploads
     volumes:
       - uploads_data:/app/uploads

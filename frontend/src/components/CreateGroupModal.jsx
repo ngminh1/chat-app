@@ -1,13 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { X, Users, Check, Search, Loader2, UserPlus, Camera } from 'lucide-react';
-
-const API_BASE = 'http://localhost:8080/api';
+import { API_BASE } from '../config/api';
 
 export default function CreateGroupModal({ isOpen, onClose, currentUserId, onGroupCreated }) {
   const [groupTitle, setGroupTitle] = useState('');
-  
-  // Upload group avatar state
   const [selectedAvatarFile, setSelectedAvatarFile] = useState(null);
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState(null);
   
@@ -102,29 +99,35 @@ export default function CreateGroupModal({ isOpen, onClose, currentUserId, onGro
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150 text-slate-900 dark:text-slate-100">
+    <div
+      onClick={onClose}
+      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-xs select-none"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150 text-slate-900 dark:text-slate-100"
+      >
         {/* Header */}
         <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-950 text-[#0084FF] flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-950 text-[#0062FF] flex items-center justify-center">
               <Users className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-base font-bold">Tạo nhóm chat mới</h2>
+              <h2 className="text-sm font-bold">Tạo nhóm chat mới</h2>
               <p className="text-[11px] text-slate-400">Tạo không gian trò chuyện cùng bạn bè</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-full hover:bg-slate-200/70 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600"
+            className="p-1.5 rounded-lg hover:bg-slate-200/70 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <form onSubmit={handleCreateGroup} className="flex-1 flex flex-col overflow-hidden p-5 space-y-4">
-          {/* Avatar nhóm & Tên nhóm */}
+          {/* Ảnh nhóm & Tên nhóm */}
           <div className="flex items-center gap-3">
             <input
               type="file"
@@ -136,19 +139,19 @@ export default function CreateGroupModal({ isOpen, onClose, currentUserId, onGro
             <div className="relative group flex-shrink-0">
               <div
                 onClick={() => fileInputRef.current?.click()}
-                className="w-14 h-14 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-[#0084FF] flex flex-col items-center justify-center cursor-pointer overflow-hidden bg-slate-50 dark:bg-slate-800 transition-all"
+                className="w-14 h-14 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-[#0062FF] flex flex-col items-center justify-center cursor-pointer overflow-hidden bg-slate-50 dark:bg-slate-800 transition-all"
               >
                 {avatarPreviewUrl ? (
                   <img src={avatarPreviewUrl} alt="" className="w-full h-full object-cover" />
                 ) : (
-                  <Camera className="w-5 h-5 text-slate-400 group-hover:text-[#0084FF]" />
+                  <Camera className="w-5 h-5 text-slate-400 group-hover:text-[#0062FF]" />
                 )}
               </div>
               {avatarPreviewUrl && (
                 <button
                   type="button"
                   onClick={removeAvatar}
-                  className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 shadow-md"
+                  className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 shadow-md cursor-pointer"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -164,7 +167,7 @@ export default function CreateGroupModal({ isOpen, onClose, currentUserId, onGro
                 placeholder="Nhập tên nhóm trò chuyện..."
                 value={groupTitle}
                 onChange={(e) => setGroupTitle(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:border-[#0084FF] transition-all"
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:outline-none focus:border-[#0062FF] transition-all"
               />
             </div>
           </div>
@@ -175,7 +178,7 @@ export default function CreateGroupModal({ isOpen, onClose, currentUserId, onGro
               <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                 Thêm thành viên
               </label>
-              <span className="text-xs font-semibold text-[#0084FF] bg-blue-50 dark:bg-blue-950/50 px-2 py-0.5 rounded-full">
+              <span className="text-xs font-semibold text-[#0062FF] bg-blue-50 dark:bg-blue-950/50 px-2 py-0.5 rounded-full">
                 {selectedUserIds.length} đã chọn
               </span>
             </div>
@@ -194,7 +197,7 @@ export default function CreateGroupModal({ isOpen, onClose, currentUserId, onGro
             <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl p-1 bg-slate-50/30 dark:bg-slate-900/40">
               {loading ? (
                 <div className="flex flex-col items-center justify-center py-10 text-slate-400 gap-2">
-                  <Loader2 className="w-5 h-5 animate-spin text-[#0084FF]" />
+                  <Loader2 className="w-5 h-5 animate-spin text-[#0062FF]" />
                   <span className="text-xs">Đang tải danh sách bạn bè...</span>
                 </div>
               ) : friends.length === 0 ? (
@@ -224,15 +227,15 @@ export default function CreateGroupModal({ isOpen, onClose, currentUserId, onGro
                           <img
                             src={item.user.avatarUrl}
                             alt=""
-                            className="w-9 h-9 rounded-full object-cover border border-slate-200 dark:border-slate-700"
+                            className="w-8 h-8 rounded-full object-cover border border-slate-200 dark:border-slate-700"
                           />
                         ) : (
-                          <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                          <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#0062FF] to-sky-400 text-white flex items-center justify-center font-bold text-xs shadow-xs">
                             {item.user.displayName.charAt(0).toUpperCase()}
                           </div>
                         )}
                         <div>
-                          <p className="text-sm font-semibold leading-tight">{item.user.displayName}</p>
+                          <p className="text-xs font-semibold leading-tight">{item.user.displayName}</p>
                           <p className="text-[11px] text-slate-400">@{item.user.username}</p>
                         </div>
                       </div>
@@ -240,7 +243,7 @@ export default function CreateGroupModal({ isOpen, onClose, currentUserId, onGro
                       <div
                         className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${
                           isSelected
-                            ? 'bg-[#0084FF] border-[#0084FF] text-white shadow-xs'
+                            ? 'bg-[#0062FF] border-[#0062FF] text-white shadow-xs'
                             : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800'
                         }`}
                       >
@@ -257,14 +260,14 @@ export default function CreateGroupModal({ isOpen, onClose, currentUserId, onGro
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-sm font-semibold rounded-xl transition-colors"
+              className="flex-1 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
             >
               Hủy
             </button>
             <button
               type="submit"
               disabled={selectedUserIds.length === 0 || submitting}
-              className="flex-1 py-2.5 bg-[#0084FF] hover:bg-blue-600 text-white text-sm font-semibold rounded-xl shadow-xs disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+              className="flex-1 py-2 bg-[#0062FF] hover:bg-[#0052D9] text-white text-xs font-semibold rounded-xl shadow-xs disabled:opacity-50 transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Tạo nhóm'}
             </button>

@@ -4,6 +4,8 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
@@ -13,14 +15,22 @@ import java.util.Date;
 @Component
 public class JwtTokenProvider {
 
-    private static final String JWT_SECRET = "chatAppSuperSecretKeyMustBeAtLeast256BitsLongForShaAlgorithmSecurity";
-    private static final long JWT_EXPIRATION = 604800000L; // 7 ngày
+    @Value("${app.jwt.secret}")
+    private String jwtSecret;
 
-    private final Key key = Keys.hmacShaKeyFor(JWT_SECRET.getBytes(StandardCharsets.UTF_8));
+    @Value("${app.jwt.expiration-ms:604800000}")
+    private long jwtExpiration;
+
+    private Key key;
+
+    @PostConstruct
+    public void init() {
+        this.key = Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8));
+    }
 
     public String generateToken(Long userId, String username) {
         Date now = new Date();
-        Date expiryDate = new Date(now.getTime() + JWT_EXPIRATION);
+        Date expiryDate = new Date(now.getTime() + jwtExpiration);
 
         return Jwts.builder()
                 .setSubject(Long.toString(userId))

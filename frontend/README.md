@@ -1,16 +1,25 @@
-# React + Vite
+# Dispatch — Realtime Communication Platform
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Dispatch là ứng dụng trò chuyện và truyền tin tức thì theo thời gian thực, xây dựng với kiến trúc hướng sự kiện (WebSocket STOMP), mã hóa chứng thực JWT và giao diện tối ưu hóa hiệu năng.
 
-Currently, two official plugins are available:
+## Công nghệ sử dụng
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+### Frontend (Client)
+- React 19 & Vite
+- Tailwind CSS & Lucide Icons
+- SockJS & STOMP Client
 
-## React Compiler
+### Backend (Server)
+- Java 21 & Spring Boot 4
+- Spring Security (JWT & BCrypt)
+- Spring WebSocket Message Broker
+- Spring Data JPA
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### Cơ sở dữ liệu & Triển khai
+- MySQL 8.0 / TiDB Cloud Serverless
+- Docker & Docker Compose
+- Nginx Reverse Proxy
 
-## Expanding the ESLint configuration
+# Dispatch — Web Client
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Giao diện web chính thức của Dispatch, xây dựng bằng React 19, Tailwind CSS và WebSocket client.

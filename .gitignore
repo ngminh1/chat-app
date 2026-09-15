@@ -13,6 +13,8 @@ dist/
 # Environment
 .env
 .env.*
+*.env
+backend/src/main/resources/application-prod.properties
 
 # Logs
 *.log

@@ -2,8 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { X, User, Camera, Save, Loader2, Volume2, Bell, MessageSquare } from 'lucide-react';
 import { requestNotificationPermission } from '../utils/browserNotifications';
-
-const API_BASE = 'http://localhost:8080/api';
+import { API_BASE } from '../config/api';
 
 export default function ProfileModal({
   isOpen,
@@ -16,7 +15,6 @@ export default function ProfileModal({
   const [displayName, setDisplayName] = useState('');
   const [currentAvatarUrl, setCurrentAvatarUrl] = useState('');
   
-  // File upload state
   const [selectedAvatarFile, setSelectedAvatarFile] = useState(null);
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -59,7 +57,6 @@ export default function ProfileModal({
     try {
       let finalAvatarUrl = currentAvatarUrl;
 
-      // Nếu có chọn ảnh mới từ máy tính -> upload trước
       if (selectedAvatarFile) {
         setIsUploading(true);
         const formData = new FormData();
@@ -106,14 +103,20 @@ export default function ProfileModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150 text-slate-900 dark:text-slate-100">
+    <div
+      onClick={onClose}
+      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-xs select-none"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150 text-slate-900 dark:text-slate-100"
+      >
         {/* Header */}
         <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50">
-          <h2 className="text-base font-bold">Cài đặt tài khoản & Thông báo</h2>
+          <h2 className="text-sm font-bold">Cài đặt tài khoản & Thông báo</h2>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-full hover:bg-slate-200/70 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 transition-colors"
+            className="p-1.5 rounded-lg hover:bg-slate-200/70 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -133,7 +136,6 @@ export default function ProfileModal({
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Chọn ảnh đại diện trực tiếp */}
             <div className="flex flex-col items-center gap-2">
               <input
                 type="file"
@@ -147,16 +149,16 @@ export default function ProfileModal({
                   <img
                     src={avatarPreviewUrl}
                     alt=""
-                    className="w-20 h-20 rounded-full object-cover border-2 border-[#0084FF] shadow-sm"
+                    className="w-20 h-20 rounded-full object-cover border-2 border-[#0062FF] shadow-xs"
                   />
                 ) : currentAvatarUrl ? (
                   <img
                     src={currentAvatarUrl}
                     alt=""
-                    className="w-20 h-20 rounded-full object-cover border-2 border-[#0084FF] shadow-sm"
+                    className="w-20 h-20 rounded-full object-cover border-2 border-[#0062FF] shadow-xs"
                   />
                 ) : (
-                  <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 text-white flex items-center justify-center font-bold text-2xl shadow-sm">
+                  <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-[#0062FF] to-sky-400 text-white flex items-center justify-center font-bold text-2xl shadow-xs">
                     {displayName ? displayName.charAt(0).toUpperCase() : 'U'}
                   </div>
                 )}
@@ -179,7 +181,7 @@ export default function ProfileModal({
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                   placeholder="Nhập tên hiển thị..."
-                  className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:border-[#0084FF] transition-all"
+                  className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:outline-none focus:border-[#0062FF] transition-all"
                   required
                 />
               </div>
@@ -188,14 +190,14 @@ export default function ProfileModal({
             <button
               type="submit"
               disabled={isLoading || isUploading}
-              className="w-full py-2.5 bg-[#0084FF] hover:bg-blue-600 text-white text-sm font-semibold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+              className="w-full py-2.5 bg-[#0062FF] hover:bg-[#0052D9] text-white text-xs font-semibold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
             >
               {isLoading || isUploading ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 <Save className="w-4 h-4" />
               )}
-              Lưu thông tin
+              Lưu thay đổi
             </button>
           </form>
 
@@ -207,12 +209,12 @@ export default function ProfileModal({
 
             <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-950 text-[#0084FF] flex items-center justify-center">
+                <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-950 text-[#0062FF] flex items-center justify-center">
                   <Volume2 className="w-4 h-4" />
                 </div>
                 <div>
                   <p className="text-xs font-semibold">Âm thanh tin nhắn</p>
-                  <p className="text-[10px] text-slate-400">Phát chuông ting ting khi nhận & gửi tin</p>
+                  <p className="text-[10px] text-slate-400">Phát chuông thông báo khi nhận & gửi tin</p>
                 </div>
               </div>
               <label className="relative inline-flex items-center cursor-pointer">
@@ -224,7 +226,7 @@ export default function ProfileModal({
                   }
                   className="sr-only peer"
                 />
-                <div className="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#0084FF]"></div>
+                <div className="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#0062FF]"></div>
               </label>
             </div>
 
@@ -234,8 +236,8 @@ export default function ProfileModal({
                   <Bell className="w-4 h-4" />
                 </div>
                 <div>
-                  <p className="text-xs font-semibold">Thông báo Desktop</p>
-                  <p className="text-[10px] text-slate-400">Thông báo đẩy khi ẩn hoặc thu nhỏ tab</p>
+                  <p className="text-xs font-semibold">Thông báo máy tính</p>
+                  <p className="text-[10px] text-slate-400">Nhận thông báo khi tab đang ẩn hoặc thu nhỏ</p>
                 </div>
               </div>
               <label className="relative inline-flex items-center cursor-pointer">
@@ -245,7 +247,7 @@ export default function ProfileModal({
                   onChange={handleToggleDesktopNotif}
                   className="sr-only peer"
                 />
-                <div className="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#0084FF]"></div>
+                <div className="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#0062FF]"></div>
               </label>
             </div>
 
@@ -255,8 +257,8 @@ export default function ProfileModal({
                   <MessageSquare className="w-4 h-4" />
                 </div>
                 <div>
-                  <p className="text-xs font-semibold">Thông báo nổi In-App</p>
-                  <p className="text-[10px] text-slate-400">Hiện Toast xem nhanh tin nhắn từ người khác</p>
+                  <p className="text-xs font-semibold">Thông báo nổi trong ứng dụng</p>
+                  <p className="text-[10px] text-slate-400">Hiển thị thông báo nhanh tin nhắn từ người khác</p>
                 </div>
               </div>
               <label className="relative inline-flex items-center cursor-pointer">
@@ -268,7 +270,7 @@ export default function ProfileModal({
                   }
                   className="sr-only peer"
                 />
-                <div className="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#0084FF]"></div>
+                <div className="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#0062FF]"></div>
               </label>
             </div>
           </div>

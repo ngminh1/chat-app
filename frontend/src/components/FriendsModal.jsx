@@ -20,7 +20,7 @@ export default function FriendsModal({
   onStartChatWithUser,
   isDarkMode
 }) {
-  const [activeTab, setActiveTab] = useState('friends'); // 'friends' | 'pending'
+  const [activeTab, setActiveTab] = useState('friends');
   const [friendsList, setFriendsList] = useState([]);
   const [pendingList, setPendingList] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -89,19 +89,25 @@ export default function FriendsModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-xs select-none">
-      <div className={`w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-150 border ${
-        isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
-      }`}>
+    <div
+      onClick={onClose}
+      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-xs select-none"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={`w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-150 border ${
+          isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
+        }`}
+      >
         {/* Header Modal */}
         <div className={`px-5 py-4 border-b flex items-center justify-between ${
           isDarkMode ? 'bg-slate-800/50 border-slate-800' : 'bg-slate-50/50 border-slate-200'
         }`}>
-          <h2 className="text-base font-bold flex items-center gap-2">
-            <Users className="w-5 h-5 text-[#0084FF]" />
-            Bạn bè & Lời mời
+          <h2 className="text-sm font-bold flex items-center gap-2">
+            <Users className="w-4 h-4 text-[#0062FF]" />
+            Danh bạ bạn bè & Lời mời
           </h2>
-          <button onClick={onClose} className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer">
+          <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -110,9 +116,9 @@ export default function FriendsModal({
         <div className={`flex border-b px-5 pt-2 gap-4 ${isDarkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}`}>
           <button
             onClick={() => setActiveTab('friends')}
-            className={`pb-3 text-xs font-bold flex items-center gap-1.5 border-b-2 transition-all cursor-pointer ${
+            className={`pb-2.5 text-xs font-bold flex items-center gap-1.5 border-b-2 transition-all cursor-pointer ${
               activeTab === 'friends'
-                ? 'border-[#0084FF] text-[#0084FF]'
+                ? 'border-[#0062FF] text-[#0062FF]'
                 : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'
             }`}
           >
@@ -122,16 +128,16 @@ export default function FriendsModal({
 
           <button
             onClick={() => setActiveTab('pending')}
-            className={`pb-3 text-xs font-bold flex items-center gap-1.5 border-b-2 transition-all cursor-pointer relative ${
+            className={`pb-2.5 text-xs font-bold flex items-center gap-1.5 border-b-2 transition-all cursor-pointer relative ${
               activeTab === 'pending'
-                ? 'border-[#0084FF] text-[#0084FF]'
+                ? 'border-[#0062FF] text-[#0062FF]'
                 : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'
             }`}
           >
             <Inbox className="w-4 h-4" />
             Lời mời kết bạn
             {pendingList.length > 0 && (
-              <span className="ml-1 px-1.5 py-0.2 bg-red-500 text-white rounded-full text-[10px] font-bold">
+              <span className="ml-1 px-1.5 py-0.2 bg-rose-500 text-white rounded-full text-[10px] font-bold">
                 {pendingList.length}
               </span>
             )}
@@ -142,7 +148,7 @@ export default function FriendsModal({
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
           {loading ? (
             <div className="text-center py-12 text-xs text-slate-400">
-              <Loader2 className="w-5 h-5 animate-spin text-[#0084FF] mx-auto mb-2" />
+              <Loader2 className="w-5 h-5 animate-spin text-[#0062FF] mx-auto mb-2" />
               Đang tải danh sách...
             </div>
           ) : activeTab === 'friends' ? (
@@ -155,15 +161,15 @@ export default function FriendsModal({
               friendsList.map((item) => (
                 <div
                   key={item.id}
-                  className={`p-3 rounded-xl border flex items-center justify-between gap-2 transition-colors ${
+                  className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 transition-colors ${
                     isDarkMode ? 'bg-slate-800/40 border-slate-800 hover:bg-slate-800/80' : 'bg-slate-50 border-slate-100 hover:bg-slate-100/80'
                   }`}
                 >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     {item.user.avatarUrl ? (
-                      <img src={item.user.avatarUrl} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+                      <img src={item.user.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
                     ) : (
-                      <div className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#0062FF] to-sky-400 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
                         {item.user.displayName.charAt(0).toUpperCase()}
                       </div>
                     )}
@@ -179,15 +185,15 @@ export default function FriendsModal({
                         onClose();
                         onStartChatWithUser(item.user);
                       }}
-                      className="p-2 bg-[#0084FF] hover:bg-blue-600 text-white rounded-lg transition-colors cursor-pointer"
-                      title="Nhắn tin"
+                      className="p-2 bg-[#0062FF] hover:bg-[#0052D9] text-white rounded-lg transition-colors cursor-pointer"
+                      title="Nhắn tin ngay"
                     >
                       <MessageSquare className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => handleUnfriend(item.id, item.user.displayName)}
                       disabled={actionLoadingId === item.id}
-                      className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg transition-colors cursor-pointer"
+                      className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
                       title="Hủy kết bạn"
                     >
                       <UserMinus className="w-3.5 h-3.5" />
@@ -206,15 +212,15 @@ export default function FriendsModal({
               pendingList.map((item) => (
                 <div
                   key={item.id}
-                  className={`p-3 rounded-xl border flex items-center justify-between gap-2 transition-colors ${
+                  className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 transition-colors ${
                     isDarkMode ? 'bg-slate-800/40 border-slate-800' : 'bg-slate-50 border-slate-100'
                   }`}
                 >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     {item.user.avatarUrl ? (
-                      <img src={item.user.avatarUrl} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+                      <img src={item.user.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
                     ) : (
-                      <div className="w-9 h-9 rounded-full bg-amber-500 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-amber-500 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
                         {item.user.displayName.charAt(0).toUpperCase()}
                       </div>
                     )}
@@ -228,7 +234,7 @@ export default function FriendsModal({
                     <button
                       onClick={() => handleAcceptRequest(item.id)}
                       disabled={actionLoadingId === item.id}
-                      className="px-3 py-1.5 bg-[#0084FF] hover:bg-blue-600 text-white text-xs font-semibold rounded-lg flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
+                      className="px-3 py-1.5 bg-[#0062FF] hover:bg-[#0052D9] text-white text-xs font-semibold rounded-lg flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
                     >
                       <Check className="w-3.5 h-3.5" /> Đồng ý
                     </button>

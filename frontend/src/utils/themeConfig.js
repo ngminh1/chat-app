@@ -1,12 +1,12 @@
 export const CHAT_THEMES = {
   blue: {
     id: 'blue',
-    name: 'Messenger Blue',
-    bgBubble: 'bg-[#0084FF] text-white',
-    accentColor: '#0084FF',
-    accentText: 'text-[#0084FF]',
+    name: 'Dispatch Blue',
+    bgBubble: 'bg-[#0062FF] text-white',
+    accentColor: '#0062FF',
+    accentText: 'text-[#0062FF]',
     accentBg: 'bg-blue-50',
-    colorCode: '#0084FF'
+    colorCode: '#0062FF'
   },
   purple: {
     id: 'purple',
