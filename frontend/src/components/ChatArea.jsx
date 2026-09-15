@@ -699,7 +699,7 @@ export default function ChatArea({
                             <p className="text-xs text-slate-400 mt-0.5">{formatFileSize(msg.fileSize)}</p>
                           </div>
                           {msg.mediaUrl && (
-                            <a href={`${API_BASE}${msg.mediaUrl}`} download={msg.fileName} target="_blank" rel="noreferrer" className="p-2 bg-white dark:bg-slate-900 hover:bg-[#0062FF] hover:text-white text-[#0062FF] rounded-xl shadow-xs flex-shrink-0 transition-colors">
+                            <a href={`${API_BASE.replace(/\/api$/, '')}${msg.mediaUrl}`} download={msg.fileName} target="_blank" rel="noreferrer" className="p-2 bg-white dark:bg-slate-900 hover:bg-[#0062FF] hover:text-white text-[#0062FF] rounded-xl shadow-xs flex-shrink-0 transition-colors">
                               <Download className="w-4 h-4" />
                             </a>
                           )}
