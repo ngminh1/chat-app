@@ -9,6 +9,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.security.SecureRandom;
+import java.util.Base64;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -27,6 +29,30 @@ public class ChatService {
     private final MessageReactionRepository messageReactionRepository;
     private final UserRepository userRepository;
     private final SimpMessagingTemplate messagingTemplate;
+
+    /**
+     * DEV ONLY: trả cùng một raw AES-256 key cho mọi thành viên của conversation.
+     * Backend biết key nên đây chỉ là cơ chế demo AES, CHƯA PHẢI E2EE.
+     */
+    public synchronized AesKeyResponse getOrCreateConversationAesKey(Long conversationId, Long userId) {
+        Conversation conversation = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new RuntimeException("Cuộc trò chuyện không tồn tại"));
+
+        conversationMemberRepository.findByConversationIdAndUserId(conversationId, userId)
+                .orElseThrow(() -> new RuntimeException("Bạn không phải thành viên của cuộc trò chuyện này"));
+
+        if (conversation.getAesKey() == null || conversation.getAesKey().isBlank()) {
+            byte[] rawKey = new byte[32]; // 256 bit
+            new SecureRandom().nextBytes(rawKey);
+            conversation.setAesKey(Base64.getEncoder().encodeToString(rawKey));
+            conversationRepository.save(conversation);
+        }
+
+        return AesKeyResponse.builder()
+                .conversationId(conversationId)
+                .key(conversation.getAesKey())
+                .build();
+    }
 
     public void updateUserPresence(Long userId, boolean isOnline) {
         userRepository.findById(userId).ifPresent(user -> {
@@ -254,10 +280,20 @@ public class ChatService {
 
         MessageType type = request.getMessageType() != null ? request.getMessageType() : MessageType.TEXT;
 
+        boolean encryptedText = type == MessageType.TEXT
+                && request.getCiphertext() != null && !request.getCiphertext().isBlank()
+                && request.getIv() != null && !request.getIv().isBlank();
+
         Message message = Message.builder()
                 .conversation(conversation)
                 .sender(sender)
-                .content(request.getContent())
+                // TEXT AES mới không lưu plaintext vào DB.
+                .content(encryptedText ? null : request.getContent())
+                .ciphertext(encryptedText ? request.getCiphertext() : null)
+                .iv(encryptedText ? request.getIv() : null)
+                .encryptionVersion(encryptedText
+                        ? (request.getEncryptionVersion() != null ? request.getEncryptionVersion() : "AES-256-GCM")
+                        : null)
                 .messageType(type)
                 .mediaUrl(request.getMediaUrl())
                 .fileName(request.getFileName())
@@ -430,7 +466,23 @@ public class ChatService {
             throw new RuntimeException("Không thể chỉnh sửa tin nhắn đã bị thu hồi");
         }
 
-        message.setContent(request.getContent());
+        boolean encryptedEdit = request.getCiphertext() != null && !request.getCiphertext().isBlank()
+                && request.getIv() != null && !request.getIv().isBlank();
+
+        if (encryptedEdit) {
+            message.setContent(null);
+            message.setCiphertext(request.getCiphertext());
+            message.setIv(request.getIv());
+            message.setEncryptionVersion(
+                    request.getEncryptionVersion() != null ? request.getEncryptionVersion() : "AES-256-GCM"
+            );
+        } else {
+            // Backward compatibility cho message legacy/plaintext.
+            message.setContent(request.getContent());
+            message.setCiphertext(null);
+            message.setIv(null);
+            message.setEncryptionVersion(null);
+        }
         message.setIsEdited(true);
         Message saved = messageRepository.save(message);
 
@@ -450,6 +502,9 @@ public class ChatService {
 
         message.setIsDeleted(true);
         message.setContent("Tin nhắn đã bị thu hồi");
+        message.setCiphertext(null);
+        message.setIv(null);
+        message.setEncryptionVersion(null);
         message.setMediaUrl(null);
         message.setFileName(null);
         message.setFileSize(null);
@@ -560,6 +615,10 @@ public class ChatService {
 
             List<Message> recent = messageRepository.findByConversationIdOrderByCreatedAtDesc(conv.getId());
             String lastMessage = "Bắt đầu cuộc trò chuyện mới";
+            String lastMessageCiphertext = null;
+            String lastMessageIv = null;
+            String lastMessageEncryptionVersion = null;
+            String lastMessageSenderName = null;
             LocalDateTime lastMessageTime = conv.getCreatedAt() != null ? conv.getCreatedAt() : LocalDateTime.now();
 
             if (!recent.isEmpty()) {
@@ -576,6 +635,13 @@ public class ChatService {
                     lastMessage = senderPrefix + "[Hình ảnh]";
                 } else if (latest.getMessageType() == MessageType.FILE) {
                     lastMessage = senderPrefix + "[Tệp đính kèm] " + (latest.getFileName() != null ? latest.getFileName() : "");
+                } else if (latest.getCiphertext() != null && latest.getIv() != null) {
+                    // Frontend sẽ decrypt preview bằng AES key của conversation.
+                    lastMessage = "[Tin nhắn được mã hóa]";
+                    lastMessageCiphertext = latest.getCiphertext();
+                    lastMessageIv = latest.getIv();
+                    lastMessageEncryptionVersion = latest.getEncryptionVersion();
+                    lastMessageSenderName = latest.getSender() != null ? latest.getSender().getDisplayName() : null;
                 } else if (latest.getContent() != null && !latest.getContent().trim().isEmpty()) {
                     lastMessage = senderPrefix + latest.getContent();
                 }
@@ -608,6 +674,10 @@ public class ChatService {
                     .memberCount(allMembers.size())
                     .otherUser(otherUserRes)
                     .lastMessage(lastMessage)
+                    .lastMessageCiphertext(lastMessageCiphertext)
+                    .lastMessageIv(lastMessageIv)
+                    .lastMessageEncryptionVersion(lastMessageEncryptionVersion)
+                    .lastMessageSenderName(lastMessageSenderName)
                     .lastMessageTime(lastMessageTime)
                     .unreadCount(unreadCount)
                     .build());
@@ -626,25 +696,39 @@ public class ChatService {
     private MessageResponse mapToMessageResponse(Message msg) {
         ReplyPreviewResponse replyPreview = null;
         if (msg.getReplyTo() != null) {
+            Message reply = msg.getReplyTo();
             String replyContent = "Tin nhắn";
-            if (Boolean.TRUE.equals(msg.getReplyTo().getIsDeleted())) {
+            String replyCiphertext = null;
+            String replyIv = null;
+            String replyEncryptionVersion = null;
+
+            if (Boolean.TRUE.equals(reply.getIsDeleted())) {
                 replyContent = "Tin nhắn đã bị thu hồi";
-            } else if (msg.getReplyTo().getMessageType() == MessageType.IMAGE) {
+            } else if (reply.getMessageType() == MessageType.IMAGE) {
                 replyContent = "[Hình ảnh]";
-            } else if (msg.getReplyTo().getMessageType() == MessageType.FILE) {
-                replyContent = "[Tệp] " + (msg.getReplyTo().getFileName() != null ? msg.getReplyTo().getFileName() : "");
-            } else if (msg.getReplyTo().getContent() != null) {
-                replyContent = msg.getReplyTo().getContent();
+            } else if (reply.getMessageType() == MessageType.FILE) {
+                replyContent = "[Tệp] " + (reply.getFileName() != null ? reply.getFileName() : "");
+            } else if (reply.getCiphertext() != null && reply.getIv() != null) {
+                // Không decrypt ở backend. Frontend dùng cùng conversation key để decrypt preview.
+                replyContent = null;
+                replyCiphertext = reply.getCiphertext();
+                replyIv = reply.getIv();
+                replyEncryptionVersion = reply.getEncryptionVersion();
+            } else if (reply.getContent() != null) {
+                replyContent = reply.getContent();
             }
 
-            Long replySenderId = msg.getReplyTo().getSender() != null ? msg.getReplyTo().getSender().getId() : null;
-            String replySenderName = msg.getReplyTo().getSender() != null ? msg.getReplyTo().getSender().getDisplayName() : "Người dùng";
+            Long replySenderId = reply.getSender() != null ? reply.getSender().getId() : null;
+            String replySenderName = reply.getSender() != null ? reply.getSender().getDisplayName() : "Người dùng";
 
             replyPreview = ReplyPreviewResponse.builder()
-                    .messageId(msg.getReplyTo().getId())
+                    .messageId(reply.getId())
                     .senderId(replySenderId)
                     .senderName(replySenderName)
                     .content(replyContent)
+                    .ciphertext(replyCiphertext)
+                    .iv(replyIv)
+                    .encryptionVersion(replyEncryptionVersion)
                     .build();
         }
 
@@ -666,6 +750,9 @@ public class ChatService {
                 .senderId(msg.getSender() != null ? msg.getSender().getId() : null)
                 .senderName(msg.getSender() != null ? msg.getSender().getDisplayName() : "Hệ thống")
                 .content(msg.getContent())
+                .ciphertext(msg.getCiphertext())
+                .iv(msg.getIv())
+                .encryptionVersion(msg.getEncryptionVersion())
                 .messageType(msg.getMessageType())
                 .mediaUrl(msg.getMediaUrl())
                 .fileName(msg.getFileName())

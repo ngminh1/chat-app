@@ -1,5 +1,6 @@
 package com.chatapp.backend.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -33,6 +34,15 @@ public class Conversation {
     @Builder.Default
     @Column(name = "theme", length = 50)
     private String theme = "blue";
+
+    /**
+     * DEV ONLY: raw AES-256 key ở dạng Base64.
+     * Dùng để hai client trong cùng conversation lấy được cùng AES key khi phase này
+     * chưa triển khai key exchange. Backend vì thế biết key => chưa phải E2EE.
+     */
+    @JsonIgnore
+    @Column(name = "aes_key", length = 100)
+    private String aesKey;
 
     @CreationTimestamp
     private LocalDateTime createdAt;

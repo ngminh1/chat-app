@@ -18,7 +18,13 @@ public class ConversationResponse {
     private String theme;
     private int memberCount;
     private UserResponse otherUser;
+
     private String lastMessage;
+    private String lastMessageCiphertext;
+    private String lastMessageIv;
+    private String lastMessageEncryptionVersion;
+    private String lastMessageSenderName;
+
     private LocalDateTime lastMessageTime;
     private long unreadCount;
 }

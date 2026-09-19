@@ -11,5 +11,9 @@ public class ReplyPreviewResponse {
     private Long messageId;
     private Long senderId;
     private String senderName;
+
     private String content;
+    private String ciphertext;
+    private String iv;
+    private String encryptionVersion;
 }

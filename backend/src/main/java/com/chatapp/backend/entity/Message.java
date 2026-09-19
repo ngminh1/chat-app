@@ -30,8 +30,19 @@ public class Message {
     @JoinColumn(name = "sender_id", nullable = false)
     private User sender;
 
+    // Legacy/system/media content. Với TEXT AES mới, field này sẽ NULL.
     @Column(columnDefinition = "TEXT")
     private String content;
+
+    // Ciphertext và IV của TEXT message AES-256-GCM.
+    @Column(name = "ciphertext", columnDefinition = "TEXT")
+    private String ciphertext;
+
+    @Column(name = "iv", length = 64)
+    private String iv;
+
+    @Column(name = "encryption_version", length = 32)
+    private String encryptionVersion;
 
     @Enumerated(EnumType.STRING)
     @Builder.Default

@@ -26,6 +26,15 @@ public class ChatController {
         return ResponseEntity.ok().build();
     }
 
+    // DEV ONLY: lấy cùng AES-256 key cho các thành viên conversation.
+    // Backend biết raw key nên chưa phải E2EE; endpoint này chỉ phục vụ phase học AES.
+    @GetMapping("/conversations/{conversationId}/aes-key")
+    public ResponseEntity<AesKeyResponse> getConversationAesKey(
+            @PathVariable Long conversationId,
+            @RequestParam Long userId) {
+        return ResponseEntity.ok(chatService.getOrCreateConversationAesKey(conversationId, userId));
+    }
+
     // Chat Themes
     @PutMapping("/conversations/{conversationId}/theme")
     public ResponseEntity<Conversation> updateTheme(

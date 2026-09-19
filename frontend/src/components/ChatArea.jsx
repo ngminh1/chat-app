@@ -116,30 +116,27 @@ export default function ChatArea({
   useEffect(() => {
     if (!searchQuery.trim()) {
       setSearchResults([]);
+      setIsSearchingLoading(false);
       return;
     }
 
-    const timer = setTimeout(async () => {
-      setIsSearchingLoading(true);
-      try {
-        const res = await axios.get(
-          `${API_BASE}/chat/conversations/${activeConversation.conversationId}/search`,
-          { params: { query: searchQuery.trim() } }
-        );
-        setSearchResults(res.data);
-        setCurrentSearchIndex(0);
-        if (res.data.length > 0) {
-          jumpToMessageId(res.data[0].id);
-        }
-      } catch (err) {
-        console.error("Lỗi tìm kiếm tin nhắn:", err);
-      } finally {
-        setIsSearchingLoading(false);
-      }
-    }, 300);
+    // Message AES đã được App decrypt trước khi truyền vào ChatArea.
+    // Vì backend chỉ có ciphertext nên search TEXT mã hóa phải làm trên plaintext phía client.
+    const query = searchQuery.trim().toLowerCase();
+    const results = messages.filter((msg) =>
+      !msg.isDeleted &&
+      typeof msg.content === 'string' &&
+      msg.content.toLowerCase().includes(query)
+    );
 
-    return () => clearTimeout(timer);
-  }, [searchQuery, activeConversation?.conversationId]);
+    setSearchResults(results);
+    setCurrentSearchIndex(0);
+    setIsSearchingLoading(false);
+
+    if (results.length > 0) {
+      setTimeout(() => jumpToMessageId(results[0].id), 0);
+    }
+  }, [searchQuery, activeConversation?.conversationId, messages]);
 
   const jumpToMessageId = (msgId) => {
     setHighlightedMsgId(msgId);

@@ -16,7 +16,12 @@ public class MessageResponse {
     private Long conversationId;
     private Long senderId;
     private String senderName;
+
     private String content;
+    private String ciphertext;
+    private String iv;
+    private String encryptionVersion;
+
     private MessageType messageType;
     private String mediaUrl;
     private String fileName;
