@@ -39,6 +39,17 @@ public class User {
     @Column(name = "last_seen_at")
     private LocalDateTime lastSeenAt;
 
+    /**
+     * ElGamal public key y của user ở dạng decimal string.
+     * Private key tuyệt đối không được gửi/lưu ở backend.
+     */
+    @Column(name = "elgamal_public_key", columnDefinition = "TEXT")
+    private String elgamalPublicKey;
+
+    @Builder.Default
+    @Column(name = "elgamal_key_version")
+    private Integer elgamalKeyVersion = 1;
+
     @CreationTimestamp
     private LocalDateTime createdAt;
 

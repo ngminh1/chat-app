@@ -2,10 +2,14 @@ package com.chatapp.backend.controller;
 
 import com.chatapp.backend.dto.UpdateProfileRequest;
 import com.chatapp.backend.dto.UserResponse;
+import com.chatapp.backend.dto.ElGamalPublicKeyRequest;
+import com.chatapp.backend.dto.ElGamalPublicKeyResponse;
 import com.chatapp.backend.entity.User;
 import com.chatapp.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -44,6 +48,62 @@ public class UserController {
                 .avatarUrl(updatedUser.getAvatarUrl())
                 .createdAt(updatedUser.getCreatedAt())
                 .build());
+    }
+
+
+    @PutMapping("/{id}/elgamal-public-key")
+    public ResponseEntity<?> registerElGamalPublicKey(
+            @PathVariable Long id,
+            @RequestBody ElGamalPublicKeyRequest request,
+            @AuthenticationPrincipal User authenticatedUser) {
+        if (authenticatedUser == null || !authenticatedUser.getId().equals(id)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Không được đăng ký public key cho user khác");
+        }
+
+        User user = userRepository.findById(id).orElse(null);
+        if (user == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        String publicKey = request.getPublicKey() != null ? request.getPublicKey().trim() : "";
+        if (publicKey.isEmpty() || !publicKey.matches("\\d+")) {
+            return ResponseEntity.badRequest().body("ElGamal public key không hợp lệ");
+        }
+
+        int keyVersion = request.getKeyVersion() != null ? request.getKeyVersion() : 1;
+        if (keyVersion < 1) {
+            return ResponseEntity.badRequest().body("ElGamal key version không hợp lệ");
+        }
+
+        // Không âm thầm thay public key: làm vậy sẽ khiến wrapped key lịch sử không thể giải mã.
+        if (user.getElgamalPublicKey() != null
+                && !user.getElgamalPublicKey().isBlank()
+                && !user.getElgamalPublicKey().equals(publicKey)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body("Tài khoản đã có ElGamal public key khác. Không tự động ghi đè khóa cũ.");
+        }
+
+        user.setElgamalPublicKey(publicKey);
+        user.setElgamalKeyVersion(keyVersion);
+        userRepository.save(user);
+
+        return ResponseEntity.ok(ElGamalPublicKeyResponse.builder()
+                .userId(user.getId())
+                .publicKey(user.getElgamalPublicKey())
+                .keyVersion(user.getElgamalKeyVersion())
+                .build());
+    }
+
+    @GetMapping("/{id}/elgamal-public-key")
+    public ResponseEntity<ElGamalPublicKeyResponse> getElGamalPublicKey(@PathVariable Long id) {
+        return userRepository.findById(id)
+                .filter(u -> u.getElgamalPublicKey() != null && !u.getElgamalPublicKey().isBlank())
+                .map(u -> ResponseEntity.ok(ElGamalPublicKeyResponse.builder()
+                        .userId(u.getId())
+                        .publicKey(u.getElgamalPublicKey())
+                        .keyVersion(u.getElgamalKeyVersion() != null ? u.getElgamalKeyVersion() : 1)
+                        .build()))
+                .orElse(ResponseEntity.notFound().build());
     }
 
     @GetMapping("/search")

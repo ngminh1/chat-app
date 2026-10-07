@@ -31,6 +31,15 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**", "/ws/**", "/uploads/**").permitAll()
+                        // Crypto key endpoints must never be callable anonymously.
+                        .requestMatchers(
+                                "/api/users/*/elgamal-public-key",
+                                "/api/chat/conversations/*/aes-key",
+                                "/api/chat/conversations/*/crypto-members",
+                                "/api/chat/conversations/*/wrapped-key",
+                                "/api/chat/conversations/*/wrapped-keys"
+                        ).authenticated()
+                        // Legacy Dispatch endpoints remain unchanged in this integration commit.
                         .anyRequest().permitAll()
                 );
 

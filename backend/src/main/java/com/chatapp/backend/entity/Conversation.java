@@ -36,9 +36,8 @@ public class Conversation {
     private String theme = "blue";
 
     /**
-     * DEV ONLY: raw AES-256 key ở dạng Base64.
-     * Dùng để hai client trong cùng conversation lấy được cùng AES key khi phase này
-     * chưa triển khai key exchange. Backend vì thế biết key => chưa phải E2EE.
+     * MIGRATION ONLY: raw AES-256 key Base64 của conversation cũ/chưa wrap đủ.
+     * Khi tất cả ConversationMember đã có ElGamal wrapped key, service đặt trường này về null.
      */
     @JsonIgnore
     @Column(name = "aes_key", length = 100)

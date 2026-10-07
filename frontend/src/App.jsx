@@ -21,7 +21,7 @@ import { API_BASE, WS_URL } from './config/api';
 import { soundManager } from './utils/soundEffects';
 import { showDesktopNotification } from './utils/browserNotifications';
 import { encryptMessage, decryptMessage } from './utils/crypto';
-import { getConversationAESKey, clearAESKeyCache } from './utils/aesKeyManager';
+import { getConversationAESKey, clearAESKeyCache, ensureElGamalIdentity } from './utils/aesKeyManager';
 
 export default function App() {
   const [authToken, setAuthToken] = useState(() => localStorage.getItem('auth_token'));
@@ -222,6 +222,16 @@ export default function App() {
       setIsLoadingConversations(false);
     }
   };
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+
+    // Sinh/khôi phục ElGamal private key tại client và đăng ký public key lên backend.
+    // Private key không được gửi lên server.
+    ensureElGamalIdentity(currentUser.id).catch((err) => {
+      console.error('Không thể khởi tạo ElGamal identity:', err);
+    });
+  }, [currentUser?.id]);
 
   useEffect(() => {
     if (currentUser?.id) {

@@ -2,9 +2,11 @@ package com.chatapp.backend.controller;
 
 import com.chatapp.backend.dto.*;
 import com.chatapp.backend.entity.Conversation;
+import com.chatapp.backend.entity.User;
 import com.chatapp.backend.service.ChatService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -26,13 +28,36 @@ public class ChatController {
         return ResponseEntity.ok().build();
     }
 
-    // DEV ONLY: lấy cùng AES-256 key cho các thành viên conversation.
-    // Backend biết raw key nên chưa phải E2EE; endpoint này chỉ phục vụ phase học AES.
+    // MIGRATION ONLY: raw AES key chỉ tồn tại cho conversation chưa migrate ElGamal.
     @GetMapping("/conversations/{conversationId}/aes-key")
     public ResponseEntity<AesKeyResponse> getConversationAesKey(
             @PathVariable Long conversationId,
-            @RequestParam Long userId) {
-        return ResponseEntity.ok(chatService.getOrCreateConversationAesKey(conversationId, userId));
+            @AuthenticationPrincipal User authenticatedUser) {
+        return ResponseEntity.ok(chatService.getOrCreateConversationAesKey(conversationId, authenticatedUser.getId()));
+    }
+
+    @GetMapping("/conversations/{conversationId}/crypto-members")
+    public ResponseEntity<List<CryptoMemberResponse>> getConversationCryptoMembers(
+            @PathVariable Long conversationId,
+            @AuthenticationPrincipal User authenticatedUser) {
+        return ResponseEntity.ok(chatService.getConversationCryptoMembers(conversationId, authenticatedUser.getId()));
+    }
+
+    @GetMapping("/conversations/{conversationId}/wrapped-key")
+    public ResponseEntity<WrappedKeyResponse> getConversationWrappedKey(
+            @PathVariable Long conversationId,
+            @AuthenticationPrincipal User authenticatedUser) {
+        WrappedKeyResponse response = chatService.getConversationWrappedKey(conversationId, authenticatedUser.getId());
+        return response != null ? ResponseEntity.ok(response) : ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/conversations/{conversationId}/wrapped-keys")
+    public ResponseEntity<Void> saveConversationWrappedKeys(
+            @PathVariable Long conversationId,
+            @RequestBody WrappedKeyBatchRequest request,
+            @AuthenticationPrincipal User authenticatedUser) {
+        chatService.saveConversationWrappedKeys(conversationId, authenticatedUser.getId(), request);
+        return ResponseEntity.ok().build();
     }
 
     // Chat Themes
@@ -76,8 +101,9 @@ public class ChatController {
     public ResponseEntity<Void> addGroupMember(
             @PathVariable Long conversationId,
             @RequestParam Long currentUserId,
-            @RequestParam Long targetUserId) {
-        chatService.addGroupMember(conversationId, currentUserId, targetUserId);
+            @RequestParam Long targetUserId,
+            @RequestBody(required = false) WrappedKeyItem wrappedKey) {
+        chatService.addGroupMember(conversationId, currentUserId, targetUserId, wrappedKey);
         return ResponseEntity.ok().build();
     }
 

@@ -37,4 +37,14 @@ public class ConversationMember {
 
     @Column(name = "last_read_at")
     private LocalDateTime lastReadAt;
+
+    /** ElGamal(c1,c2) của AES conversation key dành riêng cho user này. */
+    @Column(name = "encrypted_aes_key_c1", columnDefinition = "TEXT")
+    private String encryptedAesKeyC1;
+
+    @Column(name = "encrypted_aes_key_c2", columnDefinition = "TEXT")
+    private String encryptedAesKeyC2;
+
+    @Column(name = "wrapped_key_version")
+    private Integer wrappedKeyVersion;
 }

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { CHAT_THEMES } from '../utils/themeConfig';
 import { API_BASE } from '../config/api';
+import { wrapConversationKeyForUser } from '../utils/aesKeyManager';
 
 export default function GroupDetailModal({
   isOpen,
@@ -119,15 +120,21 @@ export default function GroupDetailModal({
   const handleAddMember = async (targetUserId) => {
     setActionLoading(true);
     try {
+      const wrappedKey = await wrapConversationKeyForUser(
+        conversation.conversationId,
+        currentUserId,
+        targetUserId
+      );
+
       await axios.post(
         `${API_BASE}/chat/conversations/${conversation.conversationId}/members`,
-        null,
+        wrappedKey,
         { params: { currentUserId, targetUserId } }
       );
       await fetchMembers();
       setIsAddingMember(false);
     } catch (err) {
-      alert(err.response?.data?.message || "Không thể thêm thành viên");
+      alert(err.response?.data?.message || err.response?.data || err.message || "Không thể thêm thành viên");
     } finally {
       setActionLoading(false);
     }

@@ -31,8 +31,12 @@ public class ChatService {
     private final SimpMessagingTemplate messagingTemplate;
 
     /**
-     * DEV ONLY: trả cùng một raw AES-256 key cho mọi thành viên của conversation.
-     * Backend biết key nên đây chỉ là cơ chế demo AES, CHƯA PHẢI E2EE.
+     * MIGRATION ONLY: lấy raw AES key khi conversation chưa có wrapped key ElGamal.
+     *
+     * Luồng mới sẽ lập tức bọc key này bằng public key ElGamal của từng thành viên và
+     * xóa raw key khỏi Conversation khi tất cả thành viên đã có wrapped key.
+     * Nếu conversation đã migrate thì TUYỆT ĐỐI không sinh key mới, vì sinh key mới
+     * sẽ làm toàn bộ ciphertext cũ không thể giải mã.
      */
     public synchronized AesKeyResponse getOrCreateConversationAesKey(Long conversationId, Long userId) {
         Conversation conversation = conversationRepository.findById(conversationId)
@@ -42,6 +46,12 @@ public class ChatService {
                 .orElseThrow(() -> new RuntimeException("Bạn không phải thành viên của cuộc trò chuyện này"));
 
         if (conversation.getAesKey() == null || conversation.getAesKey().isBlank()) {
+            List<ConversationMember> members = conversationMemberRepository.findByConversationId(conversationId);
+            boolean alreadyMigrated = members.stream().anyMatch(this::hasWrappedKey);
+            if (alreadyMigrated) {
+                throw new RuntimeException("Conversation đã dùng ElGamal wrapped key; không được sinh raw AES key mới");
+            }
+
             byte[] rawKey = new byte[32]; // 256 bit
             new SecureRandom().nextBytes(rawKey);
             conversation.setAesKey(Base64.getEncoder().encodeToString(rawKey));
@@ -52,6 +62,104 @@ public class ChatService {
                 .conversationId(conversationId)
                 .key(conversation.getAesKey())
                 .build();
+    }
+
+    public List<CryptoMemberResponse> getConversationCryptoMembers(Long conversationId, Long requesterId) {
+        conversationMemberRepository.findByConversationIdAndUserId(conversationId, requesterId)
+                .orElseThrow(() -> new RuntimeException("Bạn không phải thành viên của cuộc trò chuyện này"));
+
+        return conversationMemberRepository.findByConversationId(conversationId).stream()
+                .map(member -> CryptoMemberResponse.builder()
+                        .userId(member.getUser().getId())
+                        .publicKey(member.getUser().getElgamalPublicKey())
+                        .keyVersion(member.getUser().getElgamalKeyVersion() != null
+                                ? member.getUser().getElgamalKeyVersion()
+                                : 1)
+                        .hasWrappedKey(hasWrappedKey(member))
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    public WrappedKeyResponse getConversationWrappedKey(Long conversationId, Long userId) {
+        ConversationMember member = conversationMemberRepository
+                .findByConversationIdAndUserId(conversationId, userId)
+                .orElseThrow(() -> new RuntimeException("Bạn không phải thành viên của cuộc trò chuyện này"));
+
+        if (!hasWrappedKey(member)) {
+            return null;
+        }
+
+        return WrappedKeyResponse.builder()
+                .conversationId(conversationId)
+                .userId(userId)
+                .c1(member.getEncryptedAesKeyC1())
+                .c2(member.getEncryptedAesKeyC2())
+                .keyVersion(member.getWrappedKeyVersion() != null ? member.getWrappedKeyVersion() : 1)
+                .build();
+    }
+
+    public void saveConversationWrappedKeys(
+            Long conversationId,
+            Long requesterId,
+            WrappedKeyBatchRequest request) {
+        Conversation conversation = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new RuntimeException("Cuộc trò chuyện không tồn tại"));
+
+        conversationMemberRepository.findByConversationIdAndUserId(conversationId, requesterId)
+                .orElseThrow(() -> new RuntimeException("Bạn không phải thành viên của cuộc trò chuyện này"));
+
+        if (request == null || request.getKeys() == null || request.getKeys().isEmpty()) {
+            throw new RuntimeException("Danh sách wrapped key rỗng");
+        }
+
+        for (WrappedKeyItem item : request.getKeys()) {
+            if (item.getUserId() == null
+                    || item.getC1() == null || !item.getC1().matches("\\d+")
+                    || item.getC2() == null || !item.getC2().matches("\\d+")) {
+                throw new RuntimeException("Wrapped key ElGamal không hợp lệ");
+            }
+
+            ConversationMember target = conversationMemberRepository
+                    .findByConversationIdAndUserId(conversationId, item.getUserId())
+                    .orElseThrow(() -> new RuntimeException("Wrapped key chứa user không thuộc conversation"));
+
+            // Sau khi raw AES key đã bị xóa, không cho batch migration ghi đè wrapped key đã có.
+            // Điều này tránh một member làm hỏng lịch sử của member khác bằng c1/c2 giả.
+            if (hasWrappedKey(target)
+                    && (conversation.getAesKey() == null || conversation.getAesKey().isBlank())) {
+                continue;
+            }
+
+            int targetKeyVersion = target.getUser().getElgamalKeyVersion() != null
+                    ? target.getUser().getElgamalKeyVersion()
+                    : 1;
+            int suppliedKeyVersion = item.getKeyVersion() != null ? item.getKeyVersion() : 1;
+            if (suppliedKeyVersion != targetKeyVersion) {
+                throw new RuntimeException("Wrapped key version không khớp public key của user");
+            }
+
+            target.setEncryptedAesKeyC1(item.getC1());
+            target.setEncryptedAesKeyC2(item.getC2());
+            target.setWrappedKeyVersion(suppliedKeyVersion);
+            conversationMemberRepository.save(target);
+        }
+
+        clearLegacyAesKeyIfFullyWrapped(conversation);
+    }
+
+    private boolean hasWrappedKey(ConversationMember member) {
+        return member.getEncryptedAesKeyC1() != null
+                && !member.getEncryptedAesKeyC1().isBlank()
+                && member.getEncryptedAesKeyC2() != null
+                && !member.getEncryptedAesKeyC2().isBlank();
+    }
+
+    private void clearLegacyAesKeyIfFullyWrapped(Conversation conversation) {
+        List<ConversationMember> members = conversationMemberRepository.findByConversationId(conversation.getId());
+        if (!members.isEmpty() && members.stream().allMatch(this::hasWrappedKey)) {
+            conversation.setAesKey(null);
+            conversationRepository.save(conversation);
+        }
     }
 
     public void updateUserPresence(Long userId, boolean isOnline) {
@@ -161,7 +269,11 @@ public class ChatService {
         return savedGroup;
     }
 
-    public void addGroupMember(Long conversationId, Long currentUserId, Long targetUserId) {
+    public void addGroupMember(
+            Long conversationId,
+            Long currentUserId,
+            Long targetUserId,
+            WrappedKeyItem wrappedKey) {
         Conversation conv = getGroupConversation(conversationId);
         validateGroupMembership(conv.getId(), currentUserId);
 
@@ -175,13 +287,44 @@ public class ChatService {
         User currentUser = userRepository.findById(currentUserId)
                 .orElseThrow(() -> new RuntimeException("User hiện tại không tồn tại"));
 
+        boolean conversationAlreadyMigrated = conv.getAesKey() == null
+                && conversationMemberRepository.findByConversationId(conv.getId()).stream().anyMatch(this::hasWrappedKey);
+
+        if (conversationAlreadyMigrated
+                && (wrappedKey == null || wrappedKey.getC1() == null || wrappedKey.getC2() == null)) {
+            throw new RuntimeException("Conversation đã dùng ElGamal. Cần wrapped AES key cho thành viên mới.");
+        }
+
+        if (wrappedKey != null) {
+            if (wrappedKey.getUserId() != null && !targetUserId.equals(wrappedKey.getUserId())) {
+                throw new RuntimeException("Wrapped key không thuộc thành viên đang được thêm");
+            }
+            if (wrappedKey.getC1() == null || !wrappedKey.getC1().matches("\\d+")
+                    || wrappedKey.getC2() == null || !wrappedKey.getC2().matches("\\d+")) {
+                throw new RuntimeException("Wrapped key ElGamal không hợp lệ");
+            }
+            int targetKeyVersion = targetUser.getElgamalKeyVersion() != null
+                    ? targetUser.getElgamalKeyVersion()
+                    : 1;
+            int suppliedKeyVersion = wrappedKey.getKeyVersion() != null ? wrappedKey.getKeyVersion() : 1;
+            if (suppliedKeyVersion != targetKeyVersion) {
+                throw new RuntimeException("Wrapped key version không khớp public key của thành viên mới");
+            }
+        }
+
         ConversationMember newMember = ConversationMember.builder()
                 .conversation(conv)
                 .user(targetUser)
                 .role(MemberRole.MEMBER)
                 .lastReadAt(LocalDateTime.now())
+                .encryptedAesKeyC1(wrappedKey != null ? wrappedKey.getC1() : null)
+                .encryptedAesKeyC2(wrappedKey != null ? wrappedKey.getC2() : null)
+                .wrappedKeyVersion(wrappedKey != null && wrappedKey.getKeyVersion() != null
+                        ? wrappedKey.getKeyVersion()
+                        : null)
                 .build();
         conversationMemberRepository.save(newMember);
+        clearLegacyAesKeyIfFullyWrapped(conv);
 
         sendSystemMessage(conv, currentUser, currentUser.getDisplayName() + " đã thêm " + targetUser.getDisplayName() + " vào nhóm");
     }
