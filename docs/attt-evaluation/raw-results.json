@@ -1,0 +1,227 @@
+{
+  "generatedAt": "2026-10-07T17:27:08.965Z",
+  "e2e": {
+    "pass": true,
+    "tamperRejected": true
+  },
+  "performance": [
+    {
+      "plaintext_bytes": 10,
+      "iterations": 100,
+      "aes_encrypt_avg_ms": "0.082",
+      "aes_encrypt_median_ms": "0.072",
+      "aes_encrypt_p95_ms": "0.141",
+      "aes_decrypt_avg_ms": "0.074",
+      "aes_decrypt_median_ms": "0.066",
+      "aes_decrypt_p95_ms": "0.116",
+      "sha256_avg_ms": "0.030",
+      "sha256_median_ms": "0.028",
+      "sha256_p95_ms": "0.045",
+      "total_crypto_avg_ms": "0.186"
+    },
+    {
+      "plaintext_bytes": 100,
+      "iterations": 100,
+      "aes_encrypt_avg_ms": "0.084",
+      "aes_encrypt_median_ms": "0.076",
+      "aes_encrypt_p95_ms": "0.124",
+      "aes_decrypt_avg_ms": "0.090",
+      "aes_decrypt_median_ms": "0.071",
+      "aes_decrypt_p95_ms": "0.120",
+      "sha256_avg_ms": "0.031",
+      "sha256_median_ms": "0.028",
+      "sha256_p95_ms": "0.055",
+      "total_crypto_avg_ms": "0.205"
+    },
+    {
+      "plaintext_bytes": 1024,
+      "iterations": 100,
+      "aes_encrypt_avg_ms": "0.109",
+      "aes_encrypt_median_ms": "0.094",
+      "aes_encrypt_p95_ms": "0.182",
+      "aes_decrypt_avg_ms": "0.084",
+      "aes_decrypt_median_ms": "0.072",
+      "aes_decrypt_p95_ms": "0.142",
+      "sha256_avg_ms": "0.032",
+      "sha256_median_ms": "0.028",
+      "sha256_p95_ms": "0.048",
+      "total_crypto_avg_ms": "0.224"
+    },
+    {
+      "plaintext_bytes": 10240,
+      "iterations": 100,
+      "aes_encrypt_avg_ms": "0.182",
+      "aes_encrypt_median_ms": "0.165",
+      "aes_encrypt_p95_ms": "0.334",
+      "aes_decrypt_avg_ms": "0.095",
+      "aes_decrypt_median_ms": "0.082",
+      "aes_decrypt_p95_ms": "0.152",
+      "sha256_avg_ms": "0.040",
+      "sha256_median_ms": "0.034",
+      "sha256_p95_ms": "0.063",
+      "total_crypto_avg_ms": "0.317"
+    },
+    {
+      "plaintext_bytes": 102400,
+      "iterations": 100,
+      "aes_encrypt_avg_ms": "1.206",
+      "aes_encrypt_median_ms": "0.980",
+      "aes_encrypt_p95_ms": "2.096",
+      "aes_decrypt_avg_ms": "0.493",
+      "aes_decrypt_median_ms": "0.472",
+      "aes_decrypt_p95_ms": "0.673",
+      "sha256_avg_ms": "0.295",
+      "sha256_median_ms": "0.264",
+      "sha256_p95_ms": "0.465",
+      "total_crypto_avg_ms": "1.994"
+    }
+  ],
+  "dataSize": [
+    {
+      "plaintext_bytes": 10,
+      "ciphertext_binary_bytes": 26,
+      "ciphertext_base64_chars": 36,
+      "iv_binary_bytes": 12,
+      "iv_base64_chars": 16,
+      "sha256_hex_chars": 64,
+      "encryption_version_chars": 11,
+      "transmitted_crypto_fields_bytes_no_json": 127,
+      "overhead_vs_plaintext_percent": "1170.00"
+    },
+    {
+      "plaintext_bytes": 100,
+      "ciphertext_binary_bytes": 116,
+      "ciphertext_base64_chars": 156,
+      "iv_binary_bytes": 12,
+      "iv_base64_chars": 16,
+      "sha256_hex_chars": 64,
+      "encryption_version_chars": 11,
+      "transmitted_crypto_fields_bytes_no_json": 247,
+      "overhead_vs_plaintext_percent": "147.00"
+    },
+    {
+      "plaintext_bytes": 1024,
+      "ciphertext_binary_bytes": 1040,
+      "ciphertext_base64_chars": 1388,
+      "iv_binary_bytes": 12,
+      "iv_base64_chars": 16,
+      "sha256_hex_chars": 64,
+      "encryption_version_chars": 11,
+      "transmitted_crypto_fields_bytes_no_json": 1479,
+      "overhead_vs_plaintext_percent": "44.43"
+    },
+    {
+      "plaintext_bytes": 10240,
+      "ciphertext_binary_bytes": 10256,
+      "ciphertext_base64_chars": 13676,
+      "iv_binary_bytes": 12,
+      "iv_base64_chars": 16,
+      "sha256_hex_chars": 64,
+      "encryption_version_chars": 11,
+      "transmitted_crypto_fields_bytes_no_json": 13767,
+      "overhead_vs_plaintext_percent": "34.44"
+    },
+    {
+      "plaintext_bytes": 102400,
+      "ciphertext_binary_bytes": 102416,
+      "ciphertext_base64_chars": 136556,
+      "iv_binary_bytes": 12,
+      "iv_base64_chars": 16,
+      "sha256_hex_chars": 64,
+      "encryption_version_chars": 11,
+      "transmitted_crypto_fields_bytes_no_json": 136647,
+      "overhead_vs_plaintext_percent": "33.44"
+    }
+  ],
+  "elgamal": {
+    "iterations": 20,
+    "keypair_two_users_avg_ms": "18.843",
+    "keypair_two_users_p95_ms": "19.438",
+    "wrap_aes_key_avg_ms": "18.930",
+    "wrap_aes_key_p95_ms": "19.971",
+    "unwrap_aes_key_avg_ms": "9.943",
+    "unwrap_aes_key_p95_ms": "10.389",
+    "wrapped_key_json_bytes": 1304
+  },
+  "staticChecks": [
+    {
+      "name": "TEXT encrypted message stores content = null",
+      "pass": true,
+      "evidence": "ChatService.sendMessage"
+    },
+    {
+      "name": "Message entity has ciphertext + IV + SHA fields",
+      "pass": true,
+      "evidence": "Message.java"
+    },
+    {
+      "name": "Backend User stores ElGamal public key, not ElGamal private key field",
+      "pass": true,
+      "evidence": "User.java"
+    },
+    {
+      "name": "Per-member wrapped AES key fields exist",
+      "pass": true,
+      "evidence": "ConversationMember.java"
+    },
+    {
+      "name": "Crypto key endpoints require authentication",
+      "pass": true,
+      "evidence": "SecurityConfig.java"
+    },
+    {
+      "name": "Frontend persists ElGamal private key only on client",
+      "pass": true,
+      "evidence": "aesKeyManager.js"
+    },
+    {
+      "name": "Legacy raw AES key is migration-only and deleted after wrapping",
+      "pass": true,
+      "evidence": "ChatService.java"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "HIGH",
+      "item": "Nhiá»u API legacy váº«n permitAll",
+      "consequence": "CÃ³ thá»ƒ giáº£ senderId/currentUserId hoáº·c gá»i API ngoÃ i Ã½ muá»‘n; E2EE khÃ´ng thay tháº¿ authorization.",
+      "recommendation": "Chuyá»ƒn API nghiá»‡p vá»¥ sang authenticated() vÃ  láº¥y user tá»« JWT, khÃ´ng tin userId do client gá»­i."
+    },
+    {
+      "severity": "HIGH",
+      "item": "ElGamal private key lÆ°u plaintext trong localStorage",
+      "consequence": "XSS hoáº·c script Ä‘á»™c háº¡i cÃ¹ng origin cÃ³ thá»ƒ láº¥y khÃ³a vÃ  giáº£i mÃ£ lá»‹ch sá»­.",
+      "recommendation": "MÃ£ hÃ³a private key báº±ng khÃ³a dáº«n xuáº¥t tá»« máº­t kháº©u/credential vÃ  lÆ°u IndexedDB; triá»ƒn khai CSP chá»‘ng XSS."
+    },
+    {
+      "severity": "CRITICAL",
+      "item": "DB password cÃ³ váº» hard-code trong application.properties",
+      "consequence": "Náº¿u repository/file bá»‹ lá»™, database cÃ³ thá»ƒ bá»‹ truy cáº­p trÃ¡i phÃ©p.",
+      "recommendation": "Rotate credential vÃ  chuyá»ƒn sang biáº¿n mÃ´i trÆ°á»ng. KhÃ´ng commit secret tháº­t."
+    },
+    {
+      "severity": "CRITICAL",
+      "item": "JWT secret cÃ³ váº» hard-code trong application.properties",
+      "consequence": "Náº¿u secret bá»‹ lá»™, káº» táº¥n cÃ´ng cÃ³ thá»ƒ tá»± kÃ½ JWT giáº£.",
+      "recommendation": "Rotate JWT secret vÃ  chuyá»ƒn sang biáº¿n mÃ´i trÆ°á»ng."
+    },
+    {
+      "severity": "MEDIUM",
+      "item": "CORS cho phÃ©p origin rá»™ng",
+      "consequence": "TÄƒng bá» máº·t táº¥n cÃ´ng trÃ¬nh duyá»‡t, Ä‘áº·c biá»‡t khi káº¿t há»£p lá»—i XSS/token handling.",
+      "recommendation": "Chá»‰ cho phÃ©p domain frontend thá»±c táº¿ theo mÃ´i trÆ°á»ng."
+    },
+    {
+      "severity": "MEDIUM",
+      "item": "ChÆ°a cÃ³ xÃ¡c minh fingerprint/public-key giá»¯a ngÆ°á»i dÃ¹ng",
+      "consequence": "Náº¿u public key bá»‹ thay trÆ°á»›c khi wrap key, cÃ³ nguy cÆ¡ MITM á»Ÿ táº§ng phÃ¢n phá»‘i khÃ³a.",
+      "recommendation": "Hiá»ƒn thá»‹ fingerprint/QR hoáº·c cÆ¡ cháº¿ verify key ngoÃ i bÄƒng."
+    },
+    {
+      "severity": "MEDIUM",
+      "item": "ChÆ°a cÃ³ quy trÃ¬nh backup/recovery private key",
+      "consequence": "Máº¥t localStorage/trÃ¬nh duyá»‡t cÃ³ thá»ƒ lÃ m máº¥t kháº£ nÄƒng giáº£i mÃ£ lá»‹ch sá»­.",
+      "recommendation": "Thiáº¿t káº¿ encrypted key backup/recovery hoáº·c multi-device key transfer."
+    }
+  ]
+}
