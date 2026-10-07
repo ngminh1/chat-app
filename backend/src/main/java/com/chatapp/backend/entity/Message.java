@@ -44,6 +44,9 @@ public class Message {
     @Column(name = "encryption_version", length = 32)
     private String encryptionVersion;
 
+    @Column(name = "sha256", length = 64)
+    private String sha256;
+
     @Enumerated(EnumType.STRING)
     @Builder.Default
     @Column(name = "message_type", length = 30)

@@ -94,7 +94,7 @@ export default function App() {
     if (reply.ciphertext && reply.iv && reply.encryptionVersion === 'AES-256-GCM') {
       try {
         const key = await getConversationAESKey(conversationId, currentUser.id);
-        const plaintext = await decryptMessage(reply.ciphertext, reply.iv, key);
+        const plaintext = await decryptMessage(reply.ciphertext, reply.iv, key, reply.sha256);
         return { ...reply, content: plaintext };
       } catch (err) {
         console.error('Không thể giải mã reply preview:', err);
@@ -125,7 +125,7 @@ export default function App() {
     ) {
       try {
         const key = await getConversationAESKey(result.conversationId, currentUser.id);
-        result.content = await decryptMessage(result.ciphertext, result.iv, key);
+        result.content = await decryptMessage(result.ciphertext, result.iv, key, result.sha256);
       } catch (err) {
         console.error(`Không thể giải mã message ${result.id}:`, err);
         result.content = '[Không thể giải mã tin nhắn]';
@@ -141,7 +141,7 @@ export default function App() {
 
     try {
       const key = await getConversationAESKey(conv.conversationId, userId);
-      const plaintext = await decryptMessage(conv.lastMessageCiphertext, conv.lastMessageIv, key);
+      const plaintext = await decryptMessage(conv.lastMessageCiphertext, conv.lastMessageIv, key, conv.lastMessageSha256);
       const prefix = conv.type === 'GROUP' && conv.lastMessageSenderName
         ? `${conv.lastMessageSenderName}: `
         : '';
@@ -512,6 +512,7 @@ export default function App() {
       let ciphertext = null;
       let iv = null;
       let encryptionVersion = null;
+      let sha256 = null;
 
       // Phase hiện tại chỉ mã hóa TEXT. IMAGE/FILE giữ nguyên behavior cũ.
       if (messageType === 'TEXT') {
@@ -521,6 +522,7 @@ export default function App() {
         ciphertext = encrypted.ciphertext;
         iv = encrypted.iv;
         encryptionVersion = encrypted.encryptionVersion;
+        sha256 = encrypted.sha256;
       }
 
       const res = await axios.post(`${API_BASE}/chat/messages`, {
@@ -530,6 +532,7 @@ export default function App() {
         ciphertext,
         iv,
         encryptionVersion,
+        sha256,
         replyToId: replyToId || null,
         messageType,
         mediaUrl,
@@ -583,6 +586,7 @@ export default function App() {
             ciphertext: encrypted.ciphertext,
             iv: encrypted.iv,
             encryptionVersion: encrypted.encryptionVersion,
+            sha256: encrypted.sha256,
             replyToId: null,
             messageType: 'TEXT',
             mediaUrl: null,
@@ -630,7 +634,8 @@ export default function App() {
         content: null,
         ciphertext: encrypted.ciphertext,
         iv: encrypted.iv,
-        encryptionVersion: encrypted.encryptionVersion
+        encryptionVersion: encrypted.encryptionVersion,
+        sha256: encrypted.sha256
       });
 
       const updated = await decryptMessagePayload(res.data);

@@ -21,6 +21,7 @@ public class MessageResponse {
     private String ciphertext;
     private String iv;
     private String encryptionVersion;
+    private String sha256;
 
     private MessageType messageType;
     private String mediaUrl;

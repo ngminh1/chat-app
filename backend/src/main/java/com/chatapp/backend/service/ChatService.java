@@ -3,6 +3,7 @@ package com.chatapp.backend.service;
 import com.chatapp.backend.dto.*;
 import com.chatapp.backend.entity.*;
 import com.chatapp.backend.repository.*;
+import com.chatapp.backend.util.SHA;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -427,6 +428,15 @@ public class ChatService {
                 && request.getCiphertext() != null && !request.getCiphertext().isBlank()
                 && request.getIv() != null && !request.getIv().isBlank();
 
+        if (encryptedText) {
+            validateEncryptedPayload(
+                    request.getCiphertext(),
+                    request.getIv(),
+                    request.getEncryptionVersion(),
+                    request.getSha256()
+            );
+        }
+
         Message message = Message.builder()
                 .conversation(conversation)
                 .sender(sender)
@@ -437,6 +447,7 @@ public class ChatService {
                 .encryptionVersion(encryptedText
                         ? (request.getEncryptionVersion() != null ? request.getEncryptionVersion() : "AES-256-GCM")
                         : null)
+                .sha256(encryptedText ? request.getSha256().toLowerCase() : null)
                 .messageType(type)
                 .mediaUrl(request.getMediaUrl())
                 .fileName(request.getFileName())
@@ -613,18 +624,26 @@ public class ChatService {
                 && request.getIv() != null && !request.getIv().isBlank();
 
         if (encryptedEdit) {
+            validateEncryptedPayload(
+                    request.getCiphertext(),
+                    request.getIv(),
+                    request.getEncryptionVersion(),
+                    request.getSha256()
+            );
             message.setContent(null);
             message.setCiphertext(request.getCiphertext());
             message.setIv(request.getIv());
             message.setEncryptionVersion(
                     request.getEncryptionVersion() != null ? request.getEncryptionVersion() : "AES-256-GCM"
             );
+            message.setSha256(request.getSha256().toLowerCase());
         } else {
             // Backward compatibility cho message legacy/plaintext.
             message.setContent(request.getContent());
             message.setCiphertext(null);
             message.setIv(null);
             message.setEncryptionVersion(null);
+            message.setSha256(null);
         }
         message.setIsEdited(true);
         Message saved = messageRepository.save(message);
@@ -648,6 +667,7 @@ public class ChatService {
         message.setCiphertext(null);
         message.setIv(null);
         message.setEncryptionVersion(null);
+        message.setSha256(null);
         message.setMediaUrl(null);
         message.setFileName(null);
         message.setFileSize(null);
@@ -761,6 +781,7 @@ public class ChatService {
             String lastMessageCiphertext = null;
             String lastMessageIv = null;
             String lastMessageEncryptionVersion = null;
+            String lastMessageSha256 = null;
             String lastMessageSenderName = null;
             LocalDateTime lastMessageTime = conv.getCreatedAt() != null ? conv.getCreatedAt() : LocalDateTime.now();
 
@@ -784,6 +805,7 @@ public class ChatService {
                     lastMessageCiphertext = latest.getCiphertext();
                     lastMessageIv = latest.getIv();
                     lastMessageEncryptionVersion = latest.getEncryptionVersion();
+                    lastMessageSha256 = latest.getSha256();
                     lastMessageSenderName = latest.getSender() != null ? latest.getSender().getDisplayName() : null;
                 } else if (latest.getContent() != null && !latest.getContent().trim().isEmpty()) {
                     lastMessage = senderPrefix + latest.getContent();
@@ -820,6 +842,7 @@ public class ChatService {
                     .lastMessageCiphertext(lastMessageCiphertext)
                     .lastMessageIv(lastMessageIv)
                     .lastMessageEncryptionVersion(lastMessageEncryptionVersion)
+                    .lastMessageSha256(lastMessageSha256)
                     .lastMessageSenderName(lastMessageSenderName)
                     .lastMessageTime(lastMessageTime)
                     .unreadCount(unreadCount)
@@ -836,6 +859,20 @@ public class ChatService {
         return responses;
     }
 
+    private void validateEncryptedPayload(String ciphertext, String iv, String encryptionVersion, String sha256) {
+        if (sha256 == null || !sha256.matches("(?i)^[0-9a-f]{64}$")) {
+            throw new RuntimeException("Thiếu hoặc sai định dạng SHA-256 của encrypted payload");
+        }
+
+        String version = (encryptionVersion == null || encryptionVersion.isBlank())
+                ? "AES-256-GCM"
+                : encryptionVersion;
+
+        if (!SHA.verifyEncryptedPayload(ciphertext, iv, version, sha256)) {
+            throw new RuntimeException("SHA-256 không khớp: encrypted payload có thể đã bị thay đổi");
+        }
+    }
+
     private MessageResponse mapToMessageResponse(Message msg) {
         ReplyPreviewResponse replyPreview = null;
         if (msg.getReplyTo() != null) {
@@ -844,6 +881,7 @@ public class ChatService {
             String replyCiphertext = null;
             String replyIv = null;
             String replyEncryptionVersion = null;
+            String replySha256 = null;
 
             if (Boolean.TRUE.equals(reply.getIsDeleted())) {
                 replyContent = "Tin nhắn đã bị thu hồi";
@@ -857,6 +895,7 @@ public class ChatService {
                 replyCiphertext = reply.getCiphertext();
                 replyIv = reply.getIv();
                 replyEncryptionVersion = reply.getEncryptionVersion();
+                replySha256 = reply.getSha256();
             } else if (reply.getContent() != null) {
                 replyContent = reply.getContent();
             }
@@ -872,6 +911,7 @@ public class ChatService {
                     .ciphertext(replyCiphertext)
                     .iv(replyIv)
                     .encryptionVersion(replyEncryptionVersion)
+                    .sha256(replySha256)
                     .build();
         }
 
@@ -896,6 +936,7 @@ public class ChatService {
                 .ciphertext(msg.getCiphertext())
                 .iv(msg.getIv())
                 .encryptionVersion(msg.getEncryptionVersion())
+                .sha256(msg.getSha256())
                 .messageType(msg.getMessageType())
                 .mediaUrl(msg.getMediaUrl())
                 .fileName(msg.getFileName())

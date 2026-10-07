@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:crypto": "node --test tests/crypto-elgamal.test.mjs"
+    "test:crypto": "node --test tests/crypto-elgamal.test.mjs tests/crypto-sha.test.mjs"
   },
   "dependencies": {
     "@stomp/stompjs": "^7.3.0",

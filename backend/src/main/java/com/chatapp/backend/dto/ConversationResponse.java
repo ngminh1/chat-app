@@ -23,6 +23,7 @@ public class ConversationResponse {
     private String lastMessageCiphertext;
     private String lastMessageIv;
     private String lastMessageEncryptionVersion;
+    private String lastMessageSha256;
     private String lastMessageSenderName;
 
     private LocalDateTime lastMessageTime;
