@@ -1,3 +1,4 @@
+
 package com.chatapp.backend.service;
 
 import com.chatapp.backend.dto.*;
@@ -8,6 +9,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.security.SecureRandom;
@@ -15,6 +18,7 @@ import java.util.Base64;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -346,6 +350,7 @@ public class ChatService {
         User currentUser = currentMember.getUser();
 
         conversationMemberRepository.delete(targetMember);
+        notifyMembershipChangeAfterCommit(conv.getId(), targetUserId);
         sendSystemMessage(conv, currentUser, currentUser.getDisplayName() + " đã xóa " + targetUser.getDisplayName() + " khỏi nhóm");
     }
 
@@ -356,6 +361,7 @@ public class ChatService {
 
         User user = member.getUser();
         conversationMemberRepository.delete(member);
+        notifyMembershipChangeAfterCommit(conv.getId(), userId);
 
         List<ConversationMember> remainingMembers = conversationMemberRepository.findByConversationId(conv.getId());
         if (remainingMembers.isEmpty()) {
@@ -414,19 +420,32 @@ public class ChatService {
         Conversation conversation = conversationRepository.findById(request.getConversationId())
                 .orElseThrow(() -> new RuntimeException("Cuộc trò chuyện không tồn tại"));
 
+        // Không bao giờ cho phép một tài khoản gửi vào hội thoại không tham gia.
+        requireConversationMember(conversation.getId(), request.getSenderId());
         User sender = userRepository.findById(request.getSenderId())
                 .orElseThrow(() -> new RuntimeException("Người gửi không tồn tại"));
 
         Message replyToMessage = null;
         if (request.getReplyToId() != null) {
             replyToMessage = messageRepository.findById(request.getReplyToId()).orElse(null);
+            if (replyToMessage != null && !replyToMessage.getConversation().getId().equals(conversation.getId())) {
+                throw new IllegalArgumentException("Không được reply tin nhắn từ hội thoại khác");
+            }
         }
 
         MessageType type = request.getMessageType() != null ? request.getMessageType() : MessageType.TEXT;
+        if (type == MessageType.SYSTEM) {
+            throw new IllegalArgumentException("Chỉ backend mới được tạo thông báo SYSTEM");
+        }
 
         boolean encryptedText = type == MessageType.TEXT
                 && request.getCiphertext() != null && !request.getCiphertext().isBlank()
                 && request.getIv() != null && !request.getIv().isBlank();
+
+        // Hệ thống SYSTEM do service tạo riêng; TEXT gửi từ API phải là AES-GCM.
+        if (type == MessageType.TEXT && !encryptedText) {
+            throw new IllegalArgumentException("Tin nhắn TEXT phải được mã hóa AES-GCM");
+        }
 
         if (encryptedText) {
             validateEncryptedPayload(
@@ -483,6 +502,10 @@ public class ChatService {
     public List<MessageResponse> forwardMessage(ForwardMessageRequest request) {
         Message originalMessage = messageRepository.findById(request.getMessageId())
                 .orElseThrow(() -> new RuntimeException("Tin nhắn không tồn tại"));
+
+        if (originalMessage.getMessageType() == MessageType.TEXT) {
+            throw new IllegalArgumentException("Chuyển tiếp TEXT phải mã hóa lại bằng khóa của hội thoại đích ở client");
+        }
 
         if (Boolean.TRUE.equals(originalMessage.getIsDeleted())) {
             throw new RuntimeException("Không thể chuyển tiếp tin nhắn đã bị thu hồi");
@@ -573,6 +596,44 @@ public class ChatService {
                 .collect(Collectors.toList());
     }
 
+    private void notifyMembershipChangeAfterCommit(Long conversationId, Long removedUserId) {
+        List<Long> remainingIds = conversationMemberRepository
+                .findByConversationId(conversationId)
+                .stream()
+                .map(m -> m.getUser().getId())
+                .filter(id -> !id.equals(removedUserId))
+                .toList();
+
+        TransactionSynchronizationManager.registerSynchronization(
+                new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        Map<String, Object> removedEvent = Map.of(
+                                "event", "GROUP_REMOVED",
+                                "conversationId", conversationId
+                        );
+
+                        messagingTemplate.convertAndSend(
+                                "/topic/users/" + removedUserId + "/messages",
+                                (Object) removedEvent
+                        );
+
+                        Map<String, Object> changedEvent = Map.of(
+                                "event", "GROUP_MEMBERS_CHANGED",
+                                "conversationId", conversationId
+                        );
+
+                        for (Long id : remainingIds) {
+                            messagingTemplate.convertAndSend(
+                                    "/topic/users/" + id + "/messages",
+                                    (Object) changedEvent
+                            );
+                        }
+                    }
+                }
+        );
+    }
+
     private void sendSystemMessage(Conversation conv, User sender, String content) {
         Message systemMsg = Message.builder()
                 .conversation(conv)
@@ -603,6 +664,12 @@ public class ChatService {
         return conv;
     }
 
+    private void requireConversationMember(Long convId, Long userId) {
+        conversationMemberRepository.findByConversationIdAndUserId(convId, userId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.FORBIDDEN, "Không thuộc hội thoại"));
+    }
+
     private void validateGroupMembership(Long convId, Long userId) {
         conversationMemberRepository.findByConversationIdAndUserId(convId, userId)
                 .orElseThrow(() -> new RuntimeException("Bạn không phải là thành viên trong nhóm này"));
@@ -612,6 +679,9 @@ public class ChatService {
         Message message = messageRepository.findById(request.getMessageId())
                 .orElseThrow(() -> new RuntimeException("Tin nhắn không tồn tại"));
 
+        if (message.getMessageType() != MessageType.TEXT) {
+            throw new IllegalArgumentException("Chỉ chỉnh sửa tin nhắn TEXT");
+        }
         if (!message.getSender().getId().equals(request.getSenderId())) {
             throw new RuntimeException("Bạn chỉ có thể chỉnh sửa tin nhắn của chính mình");
         }
@@ -623,28 +693,18 @@ public class ChatService {
         boolean encryptedEdit = request.getCiphertext() != null && !request.getCiphertext().isBlank()
                 && request.getIv() != null && !request.getIv().isBlank();
 
-        if (encryptedEdit) {
-            validateEncryptedPayload(
-                    request.getCiphertext(),
-                    request.getIv(),
-                    request.getEncryptionVersion(),
-                    request.getSha256()
-            );
-            message.setContent(null);
-            message.setCiphertext(request.getCiphertext());
-            message.setIv(request.getIv());
-            message.setEncryptionVersion(
-                    request.getEncryptionVersion() != null ? request.getEncryptionVersion() : "AES-256-GCM"
-            );
-            message.setSha256(request.getSha256().toLowerCase());
-        } else {
-            // Backward compatibility cho message legacy/plaintext.
-            message.setContent(request.getContent());
-            message.setCiphertext(null);
-            message.setIv(null);
-            message.setEncryptionVersion(null);
-            message.setSha256(null);
+        if (!encryptedEdit) {
+            throw new IllegalArgumentException("Nội dung chỉnh sửa phải được mã hóa AES-GCM");
         }
+        validateEncryptedPayload(
+                request.getCiphertext(), request.getIv(),
+                request.getEncryptionVersion(), request.getSha256()
+        );
+        message.setContent(null);
+        message.setCiphertext(request.getCiphertext());
+        message.setIv(request.getIv());
+        message.setEncryptionVersion("AES-256-GCM");
+        message.setSha256(request.getSha256().toLowerCase());
         message.setIsEdited(true);
         Message saved = messageRepository.save(message);
 

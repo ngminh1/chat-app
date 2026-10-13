@@ -23,6 +23,7 @@ export default function GroupDetailModal({
   onClose,
   conversation,
   currentUserId,
+  membershipChange,
   onGroupUpdated,
   onLeftGroup,
   onOpenMediaGallery,
@@ -77,6 +78,12 @@ export default function GroupDetailModal({
       }
     }
   }, [isOpen, conversation]);
+  useEffect(() => {
+    if (isOpen && isGroup &&
+        Number(membershipChange?.conversationId) === Number(conversation?.conversationId)) {
+      fetchMembers();
+    }
+  }, [membershipChange]);
 
   if (!isOpen || !conversation) return null;
 

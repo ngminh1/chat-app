@@ -15,7 +15,6 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
 @Slf4j
-@CrossOrigin(origins = "*")
 public class AuthController {
 
     private final UserRepository userRepository;
@@ -31,39 +30,22 @@ public class AuthController {
             }
 
             String username = request.getUsername().trim();
-            String rawPassword = request.getPassword().trim();
+            String rawPassword = request.getPassword();
 
             User user = userRepository.findByUsername(username).orElse(null);
 
             if (user == null) {
                 log.warn("Đăng nhập thất bại: Không tìm thấy username [{}]", username);
-                return ResponseEntity.badRequest().body("Tài khoản hoặc mật khẩu không chính xác!");
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Tài khoản hoặc mật khẩu không chính xác!");
             }
 
-            boolean passwordMatches = false;
-
-            // 1. So khớp chuẩn BCrypt
-            if (user.getPassword() != null && !user.getPassword().isEmpty()) {
-                try {
-                    passwordMatches = passwordEncoder.matches(rawPassword, user.getPassword());
-                } catch (Exception ex) {
-                    log.error("Lỗi khi so khớp BCrypt: ", ex);
-                }
-            }
-
-            // 2. Fallback cho tài khoản seed cũ hoặc plain text
+            // BCrypt là đường xác thực duy nhất. Không nhận mật khẩu seed/plaintext chung.
+            boolean passwordMatches = user.getPassword() != null
+                    && passwordEncoder.matches(rawPassword, user.getPassword());
             if (!passwordMatches) {
-                if (rawPassword.equals(user.getPassword()) || "123456".equals(rawPassword)) {
-                    passwordMatches = true;
-                    user.setPassword(passwordEncoder.encode(rawPassword));
-                    userRepository.save(user);
-                    log.info("Auto-healed password cho user: {}", username);
-                }
-            }
-
-            if (!passwordMatches) {
-                log.warn("Đăng nhập thất bại: Sai mật khẩu cho username [{}]", username);
-                return ResponseEntity.badRequest().body("Tài khoản hoặc mật khẩu không chính xác!");
+                log.warn("Đăng nhập thất bại: sai mật khẩu cho [{}]", username);
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body("Tài khoản hoặc mật khẩu không chính xác!");
             }
 
             String token = tokenProvider.generateToken(user.getId(), user.getUsername());
@@ -79,7 +61,7 @@ public class AuthController {
         } catch (Exception e) {
             log.error("Lỗi hệ thống khi đăng nhập: ", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Lỗi đăng nhập: " + e.getMessage());
+                    .body("Lỗi hệ thống khi đăng nhập.");
         }
     }
 
@@ -101,7 +83,7 @@ public class AuthController {
                 return ResponseEntity.badRequest().body("Tên đăng nhập '" + username + "' đã tồn tại trên hệ thống!");
             }
 
-            String rawPassword = request.getPassword().trim();
+            String rawPassword = request.getPassword();
             String encodedPassword = passwordEncoder.encode(rawPassword);
 
             User user = User.builder()
@@ -127,7 +109,7 @@ public class AuthController {
         } catch (Exception e) {
             log.error("Lỗi hệ thống khi đăng ký: ", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Lỗi đăng ký: " + e.getMessage());
+                    .body("Lỗi hệ thống khi đăng ký.");
         }
     }
 }

@@ -6,6 +6,7 @@ import com.chatapp.backend.dto.ElGamalPublicKeyRequest;
 import com.chatapp.backend.dto.ElGamalPublicKeyResponse;
 import com.chatapp.backend.entity.User;
 import com.chatapp.backend.repository.UserRepository;
+import com.chatapp.backend.security.RequestAccess;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -18,15 +19,16 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/users")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class UserController {
 
     private final UserRepository userRepository;
+    private final RequestAccess access;
 
     @PutMapping("/{id}")
     public ResponseEntity<?> updateUserProfile(
             @PathVariable Long id,
             @RequestBody UpdateProfileRequest request) {
+        access.requireSelf(id);
         User user = userRepository.findById(id).orElse(null);
         if (user == null) {
             return ResponseEntity.notFound().build();
@@ -110,6 +112,7 @@ public class UserController {
     public ResponseEntity<List<UserResponse>> searchUsers(
             @RequestParam String query,
             @RequestParam Long currentUserId) {
+        access.requireSelf(currentUserId);
         List<User> users = userRepository.searchUsers(query, currentUserId);
         List<UserResponse> responses = users.stream()
                 .map(u -> UserResponse.builder()

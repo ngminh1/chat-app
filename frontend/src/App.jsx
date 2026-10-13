@@ -75,6 +75,7 @@ export default function App() {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isCreateGroupModalOpen, setIsCreateGroupModalOpen] = useState(false);
   const [isGroupDetailModalOpen, setIsGroupDetailModalOpen] = useState(false);
+  const [membershipChange, setMembershipChange] = useState(null);
   const [isPinnedModalOpen, setIsPinnedModalOpen] = useState(false);
   const [isMediaGalleryOpen, setIsMediaGalleryOpen] = useState(false);
   const [forwardingMessage, setForwardingMessage] = useState(null);
@@ -292,6 +293,8 @@ export default function App() {
 
     const client = new Client({
       webSocketFactory: () => new SockJS(WS_URL),
+      // SockJS handshake không gửi Authorization header: token được kiểm tại STOMP CONNECT.
+      connectHeaders: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` },
       debug: () => {},
       reconnectDelay: 5000,
       onConnect: () => {
@@ -311,6 +314,26 @@ export default function App() {
 
         client.subscribe(`/topic/users/${currentUser.id}/messages`, async (msgFrame) => {
           const encryptedMsg = JSON.parse(msgFrame.body);
+          if (encryptedMsg.event === 'GROUP_REMOVED') {
+            const id = Number(encryptedMsg.conversationId);
+            setConversations((prev) => prev.filter((c) => Number(c.conversationId) !== id));
+            if (Number(activeConvRef.current?.conversationId) === id) {
+              setActiveConv(null);
+              setMessages([]);
+              setIsGroupDetailModalOpen(false);
+              setTypingUser(null);
+              localStorage.removeItem('active_conv_id');
+            }
+            clearAESKeyCache();
+            return;
+          }
+          if (encryptedMsg.event === 'GROUP_MEMBERS_CHANGED') {
+            setMembershipChange((prev) => ({
+              conversationId: Number(encryptedMsg.conversationId),
+              version: (prev?.version || 0) + 1
+            }));
+            return;
+          }
           const newMsg = await decryptMessagePayload(encryptedMsg);
           const currentActive = activeConvRef.current;
           const isCurrentlyActiveRoom = currentActive && currentActive.conversationId === newMsg.conversationId;
@@ -977,6 +1000,7 @@ export default function App() {
         onClose={() => setIsGroupDetailModalOpen(false)}
         conversation={activeConv}
         currentUserId={currentUser.id}
+        membershipChange={membershipChange}
         onGroupUpdated={(updatedConv) => {
           fetchConversations(currentUser.id);
           setActiveConv((prev) => ({
