@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
   X,
@@ -18,7 +18,6 @@ export default function MediaGalleryModal({
   onClose,
   conversationId,
   conversationTitle,
-  onJumpToMessage,
   isDarkMode
 }) {
   const [activeTab, setActiveTab] = useState('images');

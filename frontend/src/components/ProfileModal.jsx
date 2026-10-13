@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { X, User, Camera, Save, Loader2, Volume2, Bell, MessageSquare } from 'lucide-react';
 import { requestNotificationPermission } from '../utils/browserNotifications';
