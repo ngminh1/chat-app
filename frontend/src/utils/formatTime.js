@@ -1,14 +1,29 @@
 ﻿
+// Backend Dispatch thống nhất sinh timestamp theo UTC.
+// Timestamp có Z hoặc offset: giữ nguyên.
+// Timestamp không có timezone: hiểu là UTC.
+
 const parseServerDate = (value) => {
   if (!value) return new Date(NaN);
 
   if (value instanceof Date) return value;
 
-  // Timestamp có múi giờ (Z hoặc +07:00):
-  // JavaScript tự chuyển đổi chính xác.
-  // Timestamp không có múi giờ:
-  // hiểu theo giờ local, không tự thêm Z.
-  return new Date(value);
+  if (typeof value === 'number') {
+    return new Date(value);
+  }
+
+  const normalized = String(value)
+    .trim()
+    .replace(' ', 'T');
+
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+  const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(normalized);
+
+  if (hasTimezone || isDateOnly) {
+    return new Date(normalized);
+  }
+
+  return new Date(`${normalized}Z`);
 };
 
 export const isSameDay = (d1, d2) => {
@@ -60,9 +75,9 @@ export const formatSidebarTime = (dateStr) => {
   const now = new Date();
   const diffMs = Math.max(0, now.getTime() - date.getTime());
 
-  const diffMins = Math.floor(diffMs / (1000 * 60));
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
 
   if (diffMins < 1) return 'Vừa xong';
   if (diffMins < 60) return `${diffMins}p`;
@@ -80,7 +95,6 @@ export const formatMessageTime = (dateStr) => {
   if (!dateStr) return '';
 
   const date = parseServerDate(dateStr);
-
   if (Number.isNaN(date.getTime())) return '';
 
   return date.toLocaleTimeString('vi-VN', {
