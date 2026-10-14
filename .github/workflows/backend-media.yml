@@ -1,4 +1,4 @@
-name: Backend R2 media checks
+name: Backend Supabase media checks
 
 on:
   pull_request:
@@ -23,9 +23,9 @@ jobs:
           java-version: '21'
           cache: maven
           cache-dependency-path: backend/pom.xml
-      - name: Compile Spring Boot backend
+      - name: Compile Supabase-backed Spring Boot
         working-directory: backend
         run: mvn -B -ntp clean package -DskipTests
-      - name: Run media integrity, storage and access tests
+      - name: Run SHA-256, Supabase storage and ACL tests
         working-directory: backend
         run: mvn -B -ntp "-Dtest=SHA256Test,SHA256StreamTest,FileStorageSha256ValidationTest,MediaControllerSecurityTest" test
