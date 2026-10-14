@@ -17,6 +17,7 @@ import MediaGalleryModal from './components/MediaGalleryModal';
 import ForwardModal from './components/ForwardModal';
 import ToastNotification from './components/ToastNotification';
 import AuthScreen from './components/AuthScreen';
+import KeyVaultPanel from './components/KeyVaultPanel';
 
 import { API_BASE, WS_URL } from './config/api';
 import { soundManager } from './utils/soundEffects';
@@ -25,7 +26,8 @@ import { encryptMessage, decryptMessage } from './utils/crypto';
 import {
   getConversationAESKey,
   clearAESKeyCache,
-  ensureElGamalIdentity
+  ensureElGamalIdentity,
+  getElGamalVaultStatus
 } from './utils/aesKeyManager';
 
 export default function App() {
@@ -41,6 +43,9 @@ export default function App() {
   // Dùng nhất quán trong useCallback và dependency arrays.
   // Không truy cập currentUser.id trực tiếp khi chưa đăng nhập.
   const currentUserId = currentUser?.id;
+  const [chatKeyState, setChatKeyState] = useState('checking');
+  const [chatKeyError, setChatKeyError] = useState('');
+  const [chatKeyAttempt, setChatKeyAttempt] = useState(0);
 
   const [isDarkMode, setIsDarkMode] = useState(() => {
     return localStorage.getItem('dark_mode') === 'true';
@@ -315,6 +320,8 @@ export default function App() {
     setLastSeenMap({});
     setTypingUser(null);
     setIsReconnecting(false);
+    setChatKeyState('checking');
+    setChatKeyError('');
   };
 
   // Tải danh sách hội thoại.
@@ -353,24 +360,53 @@ export default function App() {
     }
   }, [decryptConversationPreview]);
 
-  // Khởi tạo ElGamal identity.
+  // Chỉ mở chat sau khi đã xác minh khóa thuộc tài khoản.
+  // Tài khoản cũ có khóa đúng nhưng chưa sao lưu được yêu cầu thiết lập bản sao lưu.
   useEffect(() => {
-    if (!currentUserId) return;
+    if (!currentUserId || !authToken) return;
+    let cancelled = false;
 
-    ensureElGamalIdentity(currentUserId).catch((err) => {
-      console.error(
-        'Không thể khởi tạo ElGamal identity:',
-        err
-      );
-    });
-  }, [currentUserId]);
+    const checkKeys = async () => {
+      try {
+        await ensureElGamalIdentity(currentUserId);
+        const state = await getElGamalVaultStatus(currentUserId);
+        if (!cancelled) {
+          setChatKeyError('');
+          setChatKeyState(state.hasVault ? 'ready' : 'setup');
+        }
+      } catch (err) {
+        if (cancelled) return;
+        try {
+          const state = await getElGamalVaultStatus(currentUserId);
+          if (!cancelled) {
+            setChatKeyState(state.hasVault ? 'recover' : 'missing');
+            setChatKeyError('');
+          }
+        } catch (statusError) {
+          if (!cancelled) {
+            setChatKeyState('error');
+            setChatKeyError(statusError.message || err.message);
+          }
+        }
+      }
+    };
+
+    checkKeys();
+    return () => { cancelled = true; };
+  }, [currentUserId, authToken, chatKeyAttempt]);
+
+  const retryChatKey = () => {
+    clearAESKeyCache();
+    setChatKeyState('checking');
+    setChatKeyAttempt((previous) => previous + 1);
+  };
 
   // Tải danh sách khi đăng nhập.
   useEffect(() => {
-    if (currentUserId) {
+    if (currentUserId && chatKeyState === 'ready') {
       fetchConversations(currentUserId);
     }
-  }, [currentUserId, fetchConversations]);
+  }, [currentUserId, chatKeyState, fetchConversations]);
 
   // Chọn một hội thoại.
   const handleSelectConversation = useCallback(async (conv) => {
@@ -415,7 +451,7 @@ export default function App() {
 
   // Tải lịch sử khi đổi hội thoại.
   useEffect(() => {
-    if (!activeConversationId || !currentUserId) return;
+    if (!activeConversationId || !currentUserId || chatKeyState !== 'ready') return;
 
     let cancelled = false;
 
@@ -451,12 +487,13 @@ export default function App() {
   }, [
     activeConversationId,
     currentUserId,
+    chatKeyState,
     decryptMessagePayload
   ]);
 
   // Kết nối WebSocket.
   useEffect(() => {
-    if (!currentUserId) return;
+    if (!currentUserId || chatKeyState !== 'ready') return;
 
     const client = new Client({
       webSocketFactory: () => new SockJS(WS_URL),
@@ -768,6 +805,7 @@ export default function App() {
     };
   }, [
     currentUserId,
+    chatKeyState,
     decryptMessagePayload,
     fetchConversations,
     handleSelectConversation
@@ -1407,6 +1445,21 @@ export default function App() {
   const pinnedMessages = messages.filter(
     (m) => m.isPinned && !m.isDeleted
   );
+
+  if (chatKeyState !== 'ready') {
+    return (
+      <KeyVaultPanel
+        key={currentUserId}
+        mode={chatKeyState}
+        userId={currentUserId}
+        isDarkMode={isDarkMode}
+        errorText={chatKeyError}
+        onReady={retryChatKey}
+        onRetry={retryChatKey}
+        onLogout={handleLogout}
+      />
+    );
+  }
 
   return (
     <div
