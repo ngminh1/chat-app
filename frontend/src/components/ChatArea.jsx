@@ -32,7 +32,8 @@ import { CHAT_THEMES } from '../utils/themeConfig';
 import { ChatTimelineSkeleton } from './Skeletons';
 import { API_BASE } from '../config/api';
 import ProtectedMediaImage from './ProtectedMediaImage';
-import { downloadMedia, publicMediaUrl } from '../utils/mediaAccess';
+import ProtectedMediaDownload from './ProtectedMediaDownload';
+import { publicMediaUrl } from '../utils/mediaAccess';
 
 const REACTION_LIST = ['👍', '❤️', '😂', '😮', '😢', '😡'];
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // Giới hạn 25MB
@@ -89,6 +90,13 @@ export default function ChatArea({
   const typingTimeoutRef = useRef(null);
   const imageInputRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    // Replacing a selection, changing conversations and unmounting all release its preview.
+    return () => {
+      if (filePreviewUrl) URL.revokeObjectURL(filePreviewUrl);
+    };
+  }, [filePreviewUrl]);
 
   const currentTheme = CHAT_THEMES[activeConversation?.theme] || CHAT_THEMES.blue;
 
@@ -201,10 +209,7 @@ export default function ChatArea({
   function removeSelectedFile() {
     setSelectedFile(null);
     setUploadPercent(0);
-    if (filePreviewUrl) {
-      URL.revokeObjectURL(filePreviewUrl);
-      setFilePreviewUrl(null);
-    }
+    setFilePreviewUrl(null);
   }
 
   const formatFileSize = (bytes) => {
@@ -279,7 +284,7 @@ export default function ChatArea({
         setReplyingTo(null);
         scrollToBottom('smooth');
       } catch (err) {
-        console.error("Lỗi gửi file:", err);
+        console.error('Lỗi gửi file:', err.response?.status || 'upload_failed');
         setSendErrorMessage("Không thể tải lên hoặc gửi tệp tin.");
       } finally {
         setIsUploading(false);
@@ -298,7 +303,7 @@ export default function ChatArea({
       scrollToBottom('smooth');
       await onSendMessage(text, replyId, 'TEXT', null, null, null);
     } catch (err) {
-      console.error("Lỗi gửi tin nhắn:", err);
+      console.error('Lỗi gửi tin nhắn:', err.response?.status || 'send_failed');
       setSendErrorMessage("Không thể gửi tin nhắn.");
     } finally {
       setIsSending(false);
@@ -337,6 +342,7 @@ export default function ChatArea({
   };
 
   const handleStartEdit = (msg) => {
+    if (msg.decryptionFailed) return;
     setEditingMessage(msg);
     setReplyingTo(null);
     removeSelectedFile();
@@ -623,7 +629,7 @@ export default function ChatArea({
                           <Reply className="w-3.5 h-3.5" />
                         </button>
 
-                        <button onClick={() => onStartForwardMessage(msg)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-400 hover:text-slate-600 cursor-pointer" title="Chuyển tiếp">
+                        <button disabled={msg.decryptionFailed} onClick={() => !msg.decryptionFailed && onStartForwardMessage(msg)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-400 hover:text-slate-600 cursor-pointer disabled:opacity-50 disabled:cursor-default" title="Chuyển tiếp">
                           <Share2 className="w-3.5 h-3.5" />
                         </button>
 
@@ -633,7 +639,7 @@ export default function ChatArea({
 
                         {isMe && (
                           <>
-                            {!isImage && !isFile && (
+                            {!isImage && !isFile && !msg.decryptionFailed && (
                               <button onClick={() => handleStartEdit(msg)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-400 hover:text-slate-600 cursor-pointer" title="Chỉnh sửa">
                                 <Edit2 className="w-3.5 h-3.5" />
                               </button>
@@ -689,9 +695,9 @@ export default function ChatArea({
                             <p className="text-xs text-slate-400 mt-0.5">{formatFileSize(msg.fileSize)}</p>
                           </div>
                           {msg.mediaUrl && (
-                            <button type="button" onClick={() => downloadMedia(msg.mediaUrl, msg.fileName).catch(console.error)} className="p-2 bg-white dark:bg-slate-900 hover:bg-[#0062FF] hover:text-white text-[#0062FF] rounded-xl shadow-xs flex-shrink-0 transition-colors">
+                            <ProtectedMediaDownload src={msg.mediaUrl} fileName={msg.fileName} className="p-2 bg-white dark:bg-slate-900 hover:bg-[#0062FF] hover:text-white text-[#0062FF] rounded-xl shadow-xs flex-shrink-0 transition-colors">
                               <Download className="w-4 h-4" />
-                            </button>
+                            </ProtectedMediaDownload>
                           )}
                         </div>
                       ) : isLike ? (

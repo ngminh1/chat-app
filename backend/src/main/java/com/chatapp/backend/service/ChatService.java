@@ -98,8 +98,7 @@ public synchronized AesKeyResponse getOrCreateConversationAesKey(
                 .existsByConversationIdAndCiphertextIsNotNull(conversationId);
 
         if (hasHistory) {
-            throw new IllegalStateException(
-                    "Hội thoại có tin mã hóa nhưng mất khóa AES");
+            throw new MissingConversationKeyException();
         }
 
         byte[] generated = new byte[32];

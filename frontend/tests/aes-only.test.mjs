@@ -22,3 +22,23 @@ test('each encryption uses a new IV and tampering fails authentication', async (
   altered[0] ^= 1;
   await assert.rejects(() => decryptMessage(altered.toString('base64'), first.iv, key));
 });
+
+test('GCM uses a 128-bit authentication tag, including for empty text', async () => {
+  const key = await generateAESKey();
+  const payload = await encryptMessage('', key);
+  assert.equal(Buffer.from(payload.ciphertext, 'base64').length, 16);
+  assert.equal(await decryptMessage(payload.ciphertext, payload.iv, key), '');
+  const damagedTag = Buffer.from(payload.ciphertext, 'base64');
+  damagedTag[15] ^= 1;
+  await assert.rejects(decryptMessage(damagedTag.toString('base64'), payload.iv, key), { name: 'OperationError' });
+});
+
+test('invalid IV, base64 or a missing authentication tag are rejected explicitly', async () => {
+  const key = await generateAESKey();
+  const payload = await encryptMessage('safe', key);
+  for (const [ciphertext, iv] of [
+    [payload.ciphertext, 'YWJj'], ['not base64!', payload.iv], ['YWJj', payload.iv], [null, payload.iv]
+  ]) {
+    await assert.rejects(decryptMessage(ciphertext, iv, key), { name: 'InvalidCiphertextError' });
+  }
+});

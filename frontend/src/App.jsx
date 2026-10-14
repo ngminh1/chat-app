@@ -20,8 +20,9 @@ import AuthScreen from './components/AuthScreen';
 import { API_BASE, WS_URL } from './config/api';
 import { soundManager } from './utils/soundEffects';
 import { showDesktopNotification } from './utils/browserNotifications';
-import { encryptMessage, decryptMessage } from './utils/crypto';
+import { encryptMessage } from './utils/crypto';
 import { getConversationAESKey, clearAESKeyCache } from './utils/aesKeyManager';
+import { createMessageDecryptor, getReadableMessageText } from './utils/messageDecryption';
 
 export default function App() {
   const [authToken, setAuthToken] = useState(() => localStorage.getItem('auth_token'));
@@ -60,6 +61,9 @@ export default function App() {
   // Lưu settings vào ref để callback WebSocket đọc trực tiếp mà không cần khởi tạo lại socket
   const settingsRef = useRef(settings);
   useEffect(() => { settingsRef.current = settings; }, [settings]);
+  useEffect(() => {
+    if (settings.soundEnabled) return soundManager.listenForUserActivation();
+  }, [settings.soundEnabled]);
 
   const [activeToast, setActiveToast] = useState(null);
 
@@ -88,83 +92,9 @@ export default function App() {
 
   const stompClientRef = useRef(null);
 
-  // Log each unreadable ciphertext once per session, not after every refresh/reaction.
-  const reportedDecryptFailures = useRef(new Set());
-  const reportDecryptFailure = (category, id, err) => {
-    const key = `${category}:${id}`;
-    if (reportedDecryptFailures.current.has(key)) return;
-    reportedDecryptFailures.current.add(key);
-    if (err?.name === 'OperationError') {
-      console.warn(`Không thể xác thực AES-GCM cho ${category} ${id}; giữ nguyên ciphertext trên server.`);
-    } else {
-      console.error(`Lỗi giải mã ${category} ${id}:`, err);
-    }
-  };
-
-  // Giải mã reply preview nếu reply là TEXT đã mã hóa.
-  const decryptReplyPreview = async (reply, conversationId) => {
-    if (!reply) return reply;
-
-    if (reply.ciphertext && reply.iv && reply.encryptionVersion === 'AES-256-GCM') {
-      try {
-        const key = await getConversationAESKey(conversationId, currentUser.id);
-        const plaintext = await decryptMessage(reply.ciphertext, reply.iv, key);
-        return { ...reply, content: plaintext };
-      } catch (err) {
-        reportDecryptFailure('reply', reply.id ?? `${conversationId}:${reply.iv}`, err);
-        return { ...reply, content: '[Không thể giải mã tin nhắn]' };
-      }
-    }
-
-    return reply;
-  };
-
-  // Nhận MessageResponse từ REST/WebSocket rồi biến ciphertext thành plaintext trước khi đưa vào UI.
-  const decryptMessagePayload = async (message) => {
-    if (!message) return message;
-
-    const result = { ...message };
-
-    if (result.replyTo) {
-      result.replyTo = await decryptReplyPreview(result.replyTo, result.conversationId);
-    }
-
-    if (result.isDeleted) return result;
-
-    if (
-      result.messageType === 'TEXT' &&
-      result.ciphertext &&
-      result.iv &&
-      result.encryptionVersion === 'AES-256-GCM'
-    ) {
-      try {
-        const key = await getConversationAESKey(result.conversationId, currentUser.id);
-        result.content = await decryptMessage(result.ciphertext, result.iv, key);
-      } catch (err) {
-        reportDecryptFailure('message', result.id, err);
-        result.content = '[Không thể giải mã tin nhắn]';
-      }
-    }
-
-    return result;
-  };
-
-  // Sidebar sau reload cũng phải decrypt last message.
-  const decryptConversationPreview = async (conv, userId) => {
-    if (!conv?.lastMessageCiphertext || !conv?.lastMessageIv) return conv;
-
-    try {
-      const key = await getConversationAESKey(conv.conversationId, userId);
-      const plaintext = await decryptMessage(conv.lastMessageCiphertext, conv.lastMessageIv, key);
-      const prefix = conv.type === 'GROUP' && conv.lastMessageSenderName
-        ? `${conv.lastMessageSenderName}: `
-        : '';
-      return { ...conv, lastMessage: prefix + plaintext };
-    } catch (err) {
-      reportDecryptFailure('conversation preview', conv.conversationId, err);
-      return { ...conv, lastMessage: '[Không thể giải mã tin nhắn]' };
-    }
-  };
+  const [messageDecryptor] = useState(() => createMessageDecryptor({ getKey: getConversationAESKey }));
+  const decryptMessagePayload = (message) => messageDecryptor.decryptMessagePayload(message, currentUser?.id);
+  const decryptConversationPreview = (conversation, userId) => messageDecryptor.decryptConversationPreview(conversation, userId);
 
   const handleToggleDarkMode = () => {
     const newMode = !isDarkMode;
@@ -191,6 +121,8 @@ export default function App() {
   };
 
   const handleLoginSuccess = (authData) => {
+    clearAESKeyCache();
+    messageDecryptor.clearFailures();
     localStorage.setItem('auth_token', authData.token);
     localStorage.setItem('auth_user', JSON.stringify(authData));
     setAuthToken(authData.token);
@@ -209,6 +141,7 @@ export default function App() {
     localStorage.removeItem('auth_user');
     localStorage.removeItem('active_conv_id');
     clearAESKeyCache();
+    messageDecryptor.clearFailures();
     setAuthToken(null);
     setCurrentUser(null);
     setActiveConv(null);
@@ -233,7 +166,7 @@ export default function App() {
         if (matched) setActiveConv(matched);
       }
     } catch (err) {
-      console.error("Lỗi lấy danh sách chat:", err);
+      console.error('Lỗi lấy danh sách chat.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
     } finally {
       setIsLoadingConversations(false);
     }
@@ -257,7 +190,7 @@ export default function App() {
         prev.map((c) => (c.conversationId === conv.conversationId ? { ...c, unreadCount: 0 } : c))
       );
     } catch (err) {
-      console.error("Lỗi đánh dấu đã đọc:", err);
+      console.error('Lỗi đánh dấu đã đọc.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
     }
   };
 
@@ -280,7 +213,7 @@ export default function App() {
         );
         if (!cancelled) setMessages(decryptedMessages);
       } catch (err) {
-        console.error("Lỗi tải lịch sử chat:", err);
+        console.error('Lỗi tải lịch sử chat.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
       } finally {
         if (!cancelled) setIsLoadingMessages(false);
       }
@@ -569,7 +502,7 @@ export default function App() {
         return prev.map((m) => (m.id === tempId ? serverMsg : m));
       });
     } catch (err) {
-      console.error("Lỗi gửi tin nhắn:", err);
+      console.error('Lỗi gửi tin nhắn.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
       throw err;
     }
@@ -588,13 +521,14 @@ export default function App() {
       if (sourceMessage.messageType === 'TEXT') {
         // Không copy ciphertext giữa 2 conversation vì mỗi conversation dùng AES key khác nhau.
         // UI state đã chứa plaintext => encrypt lại riêng cho từng conversation đích.
-        if (!sourceMessage.content || sourceMessage.content === '[Không thể giải mã tin nhắn]') {
+        const plaintext = getReadableMessageText(sourceMessage);
+        if (!plaintext) {
           throw new Error('Không có plaintext hợp lệ để forward');
         }
 
         for (const targetConversationId of targetConvIds) {
           const key = await getConversationAESKey(targetConversationId, currentUser.id);
-          const encrypted = await encryptMessage(sourceMessage.content, key);
+          const encrypted = await encryptMessage(plaintext, key);
 
           await axios.post(`${API_BASE}/chat/messages`, {
             conversationId: targetConversationId,
@@ -627,7 +561,7 @@ export default function App() {
         conversation: null
       });
     } catch (err) {
-      console.error("Lỗi chuyển tiếp:", err);
+      console.error('Lỗi chuyển tiếp tin nhắn.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
       setActiveToast({
         title: 'Lỗi',
         content: 'Có lỗi xảy ra khi chuyển tiếp tin nhắn.',
@@ -640,6 +574,7 @@ export default function App() {
   const handleEditMessage = async (messageId, newContent) => {
     try {
       if (!activeConv || !currentUser?.id) return;
+      getReadableMessageText(messages.find((message) => message.id === messageId));
 
       const key = await getConversationAESKey(activeConv.conversationId, currentUser.id);
       const encrypted = await encryptMessage(newContent, key); // encrypt lại => IV mới
@@ -656,7 +591,8 @@ export default function App() {
       const updated = await decryptMessagePayload(res.data);
       setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
     } catch (err) {
-      console.error("Lỗi sửa tin nhắn:", err);
+      console.error('Lỗi sửa tin nhắn.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
+      throw err;
     }
   };
 
@@ -673,7 +609,7 @@ export default function App() {
           const updated = await decryptMessagePayload(res.data);
           setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
         } catch (err) {
-          console.error("Lỗi thu hồi tin nhắn:", err);
+          console.error('Lỗi thu hồi tin nhắn.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
         } finally {
           setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
         }
@@ -692,7 +628,7 @@ export default function App() {
       const updated = await decryptMessagePayload(res.data);
       setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
     } catch (err) {
-      console.error("Lỗi thả reaction:", err);
+      console.error('Lỗi thả reaction.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
     }
   };
 
@@ -704,7 +640,7 @@ export default function App() {
       const updated = await decryptMessagePayload(res.data);
       setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
     } catch (err) {
-      console.error("Lỗi ghim tin nhắn:", err);
+      console.error('Lỗi ghim tin nhắn.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
     }
   };
 
@@ -718,7 +654,7 @@ export default function App() {
         isTyping: Boolean(isTyping)
       });
     } catch (err) {
-      console.error("Lỗi gửi typing:", err);
+      console.error('Lỗi gửi typing.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
     }
   };
 
@@ -735,7 +671,7 @@ export default function App() {
         });
         setSearchResults({ query, items: res.data });
       } catch (err) {
-        if (err.code !== 'ERR_CANCELED') console.error("Lỗi tìm kiếm user:", err);
+        if (err.code !== 'ERR_CANCELED') console.error('Lỗi tìm kiếm user.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
       }
     }, 300);
 
@@ -766,7 +702,7 @@ export default function App() {
       setSearchQuery('');
       fetchConversations(currentUser.id);
     } catch (err) {
-      console.error("Lỗi tạo phòng chat:", err);
+      console.error('Lỗi tạo phòng chat.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
     }
   };
 

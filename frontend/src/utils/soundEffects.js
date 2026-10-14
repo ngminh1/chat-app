@@ -1,19 +1,68 @@
-class SoundEffects {
+export class SoundEffects {
   constructor() {
     this.audioCtx = null;
+    this.resumePromise = null;
+    this.reportedActivationFailures = new Set();
+  }
+
+  reportActivationFailure(error) {
+    // Browser audio failures need no request/device details. Deduplicate a
+    // persistent failure until audio recovers, while keeping new error types visible.
+    const knownNames = ['NotAllowedError', 'NotSupportedError', 'InvalidStateError',
+      'SecurityError', 'AbortError', 'TypeError', 'OperationError'];
+    const reason = knownNames.includes(error?.name) ? error.name : 'AudioError';
+    if (this.reportedActivationFailures.has(reason)) return;
+    this.reportedActivationFailures.add(reason);
+    console.warn(`Không thể bật âm thanh sau tương tác (${reason}).`);
+  }
+
+  // Only a trusted user gesture may create/resume audio. Message delivery and
+  // async send callbacks must never attempt to unlock browser autoplay.
+  listenForUserActivation(target = globalThis.window) {
+    if (!target?.addEventListener) return () => {};
+
+    const activate = (event) => {
+      if (!event.isTrusted || target.navigator?.userActivation?.isActive === false) return;
+      if (event.type === 'keydown' && (event.repeat ||
+        ['Escape', 'Shift', 'Control', 'Alt', 'Meta'].includes(event.key))) return;
+
+      try {
+        if (!this.audioCtx || this.audioCtx.state === 'closed') {
+          const AudioContextClass = target.AudioContext || target.webkitAudioContext;
+          if (!AudioContextClass) return;
+          this.audioCtx = new AudioContextClass();
+        }
+
+        if (['suspended', 'interrupted'].includes(this.audioCtx.state) && !this.resumePromise) {
+          this.resumePromise = Promise.resolve(this.audioCtx.resume())
+            .then(() => {
+              if (this.audioCtx?.state === 'running') this.reportedActivationFailures.clear();
+            })
+            .catch((error) => {
+              this.reportActivationFailure(error);
+            })
+            .finally(() => {
+              this.resumePromise = null;
+            });
+        } else if (this.audioCtx.state === 'running') {
+          this.reportedActivationFailures.clear();
+        }
+      } catch (error) {
+        this.reportActivationFailure(error);
+      }
+    };
+
+    const events = ['pointerup', 'touchend', 'click', 'keydown'];
+    for (const event of events) target.addEventListener(event, activate, { capture: true, passive: true });
+    return () => {
+      for (const event of events) target.removeEventListener(event, activate, true);
+    };
   }
 
   getAudioContext() {
-    if (!this.audioCtx) {
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      if (AudioContextClass) {
-        this.audioCtx = new AudioContextClass();
-      }
-    }
-    if (this.audioCtx && this.audioCtx.state === 'suspended') {
-      this.audioCtx.resume();
-    }
-    return this.audioCtx;
+    // Drop sounds while locked/suspended; do not queue old notifications to
+    // play in a burst after the user eventually interacts with the page.
+    return this.audioCtx?.state === 'running' ? this.audioCtx : null;
   }
 
   // 1. ÂM THANH NHẬN TIN NHẮN (Chuông Marimba Chime 2 âm tầng nhẹ êm như Messenger/Telegram)
