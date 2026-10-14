@@ -3,6 +3,7 @@ package com.chatapp.backend.service;
 import com.chatapp.backend.dto.FileUploadResponse;
 import com.chatapp.backend.entity.MessageType;
 import com.chatapp.backend.security.MediaUrls;
+import com.chatapp.backend.security.sha256.SHA256;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
@@ -13,6 +14,10 @@ import java.io.IOException; // <--- Thêm import này vào
 import java.net.MalformedURLException;
 import java.nio.file.*;
 import java.util.Objects;
+import java.security.MessageDigest;
+import java.nio.charset.StandardCharsets;
+import java.util.HexFormat;
+import java.io.InputStream;
 import java.util.UUID;
 
 @Service
@@ -29,7 +34,7 @@ public class FileStorageService {
         }
     }
 
-    public FileUploadResponse storeFile(MultipartFile file, boolean avatar, Long conversationId) {
+    public FileUploadResponse storeFile(MultipartFile file, boolean avatar, Long conversationId, String expectedSha256) {
         String originalFileName = StringUtils.cleanPath(Objects.requireNonNull(file.getOriginalFilename()));
 
         try {
@@ -59,6 +64,21 @@ public class FileStorageService {
                     + UUID.randomUUID() + fileExtension;
             Path targetLocation = this.fileStorageLocation.resolve(uniqueFileName);
             Files.copy(file.getInputStream(), targetLocation, StandardCopyOption.REPLACE_EXISTING);
+            String actualSha256;
+            try (InputStream savedFile = Files.newInputStream(targetLocation)) {
+                actualSha256 = SHA256.hashStream(savedFile);
+            }
+            if (!avatar && expectedSha256 != null) {
+                if (!expectedSha256.matches("(?i)[0-9a-f]{64}") ||
+                        !MessageDigest.isEqual(
+                                actualSha256.getBytes(StandardCharsets.US_ASCII),
+                                expectedSha256.toLowerCase(java.util.Locale.ROOT).getBytes(StandardCharsets.US_ASCII))) {
+                    Files.deleteIfExists(targetLocation);
+                    throw new org.springframework.web.server.ResponseStatusException(
+                            org.springframework.http.HttpStatus.BAD_REQUEST,
+                            "SHA-256 khong khop: tep tai len bi thay doi");
+                }
+            }
 
             String contentType = file.getContentType();
             MessageType messageType = MessageType.FILE;
@@ -72,6 +92,7 @@ public class FileStorageService {
                     .fileUrl(fileDownloadUri)
                     .fileName(originalFileName)
                     .fileSize(file.getSize())
+                    .sha256(actualSha256)
                     .messageType(messageType)
                     .build();
 
