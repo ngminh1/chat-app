@@ -111,11 +111,11 @@ public class SupabaseMediaStorage {
         if (statusCode != 400 || body == null || body.length == 0) return false;
         String details = new String(body, 0, Math.min(body.length, 4096), StandardCharsets.UTF_8)
                 .replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+        boolean nested404 = details.contains("\"statuscode\":\"404\"")
+                || details.contains("\"statuscode\":404");
         return details.contains("\"code\":\"nosuchkey\"")
-                || details.contains("\"message\":\"objectnotfound\"")
-                || (details.contains("\"error\":\"not_found\"")
-                    && (details.contains("\"statuscode\":\"404\"")
-                        || details.contains("\"statuscode\":404")));
+                || (nested404 && (details.contains("\"message\":\"objectnotfound\"")
+                        || details.contains("\"error\":\"not_found\"")));
     }
 
     private HttpRequest.Builder authenticatedRequest(String fileName) {
