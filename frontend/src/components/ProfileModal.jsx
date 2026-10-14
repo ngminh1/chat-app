@@ -3,7 +3,6 @@ import axios from 'axios';
 import { X, User, Camera, Save, Loader2, Volume2, Bell, MessageSquare } from 'lucide-react';
 import { requestNotificationPermission } from '../utils/browserNotifications';
 import { API_BASE } from '../config/api';
-import KeyVaultPanel from './KeyVaultPanel';
 
 export default function ProfileModal({
   isOpen,
@@ -155,8 +154,6 @@ export default function ProfileModal({
               Lưu thay đổi
             </button>
           </form>
-
-          <KeyVaultPanel isOpen={isOpen} userId={currentUser.id} />
 
           <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
             <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
