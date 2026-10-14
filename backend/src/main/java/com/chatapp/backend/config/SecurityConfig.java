@@ -84,10 +84,12 @@ public class SecurityConfig {
         CorsConfiguration config = new CorsConfiguration();
 
         config.setAllowedOrigins(List.of(
-                "https://chat-app-gilt-rho-58.vercel.app",
-                "http://localhost:5173",
-                "http://127.0.0.1:5173"
-        ));
+    "https://dispatch.io.vn",
+    "https://www.dispatch.io.vn",
+    "https://chat-app-gilt-rho-58.vercel.app",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173"
+));
 
         config.setAllowedMethods(List.of(
                 "GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"
