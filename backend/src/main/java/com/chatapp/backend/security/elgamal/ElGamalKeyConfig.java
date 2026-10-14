@@ -16,6 +16,8 @@ import java.util.Arrays;
 )
 public class ElGamalKeyConfig {
 
+    // HOC CAU HINH: Nap cap khoa server tu ENV va tu test wrap/unwrap luc khoi dong.
+    // Khong hien thi private key, JWT hay DB password khi bao cao.
     @Bean
     public ElGamal.KeyPair elgamalKeyPair(
             @Value("${ELGAMAL_KEY_ID:server-v1}") String keyId,

@@ -47,6 +47,7 @@ public class FileStorageService {
         }
     }
 
+    // HOC UPLOAD: Attachment bat buoc co SHA-256; so sanh hash tren backend truoc khi luu Supabase.
     public FileUploadResponse storeFile(MultipartFile file, boolean avatar, Long conversationId, String expectedSha256) {
         String originalFileName = StringUtils.cleanPath(Objects.requireNonNull(file.getOriginalFilename()));
         if (file.isEmpty()) {
@@ -96,8 +97,10 @@ public class FileStorageService {
                 Files.copy(file.getInputStream(), targetLocation, StandardCopyOption.REPLACE_EXISTING);
             String actualSha256;
             try (InputStream savedFile = Files.newInputStream(targetLocation)) {
+                // HOC UPLOAD: Tinh lai digest tren bytes server nhan duoc, khong tin moi hash client gui.
                 actualSha256 = SHA256.hashStream(savedFile);
             }
+            // HOC UPLOAD: Hash khong khop => HTTP 400, khong dua tep vao luu tru.
             if (!avatar) {
                 if (!expectedSha256.matches("(?i)[0-9a-f]{64}") ||
                         !MessageDigest.isEqual(

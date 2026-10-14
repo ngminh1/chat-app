@@ -28,6 +28,7 @@ public class ElGamalKeyWrapService {
     }
 
     // Bọc khóa AES trước khi lưu database
+    // HOC TICH HOP: Base64 key -> raw 32 byte -> ElGamal.wrapKey -> JSON wrapped_aes_key.
     public String wrap(String aesKeyBase64, long conversationId) {
         byte[] rawKey = Base64.getDecoder().decode(aesKeyBase64);
 
@@ -49,6 +50,7 @@ public class ElGamalKeyWrapService {
     }
 
     // Mở khóa AES khi người dùng hợp lệ cần đọc tin
+    // HOC TICH HOP: JSON -> kiem tra keyId -> mo khoa -> Base64 AES key cho ChatService.
     public String unwrap(String wrappedJson, long conversationId) {
         byte[] rawKey = null;
 

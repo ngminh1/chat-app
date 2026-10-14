@@ -54,6 +54,7 @@ public class SupabaseMediaStorage {
                 .build();
     }
 
+    // HOC STORAGE: Chi upload sau kiem tra SHA-256; bucket private, backend giu secret key.
     public void upload(Path validatedFile, String fileName, String contentType) {
         requireSafeName(fileName);
         try {
@@ -76,6 +77,7 @@ public class SupabaseMediaStorage {
         }
     }
 
+    // HOC STORAGE: Doc tu private Supabase qua backend, phan biet mat file 404 voi 503.
     public Resource loadFileAsResource(String fileName) {
         requireSafeName(fileName);
         try {

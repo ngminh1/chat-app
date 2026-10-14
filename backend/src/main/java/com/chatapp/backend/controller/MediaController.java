@@ -34,6 +34,7 @@ public class MediaController {
     private final UserRepository users;
     private final ConversationRepository conversations;
 
+    // HOC API UPLOAD: Kiem tra tai khoan co quyen tai tep trong hoi thoai va truyen expected SHA-256.
     @PostMapping("/upload")
     public ResponseEntity<FileUploadResponse> uploadFile(
             @RequestParam("file") MultipartFile file,

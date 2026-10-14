@@ -258,6 +258,7 @@ export default function ChatArea({
         const formData = new FormData();
         formData.append('file', selectedFile);
         // SHA-256 verifies that the server receives exactly the file selected in this browser.
+        // HOC SHA: Bam dung bytes cua file truoc upload, chuyen digest 32 byte thanh 64 ky tu hex.
         const digest = await crypto.subtle.digest('SHA-256', await selectedFile.arrayBuffer());
         if (!session.isActive()) return;
         const expectedSha256 = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
@@ -278,6 +279,7 @@ export default function ChatArea({
         if (!session.isActive()) return;
 
         const { fileUrl, fileName, fileSize, messageType, sha256 } = uploadRes.data;
+        // HOC SHA: Digest backend tra ve phai trung voi digest tinh tai trinh duyet.
         if (sha256 !== expectedSha256) {
           throw new Error('SHA-256 khong khop sau khi upload');
         }

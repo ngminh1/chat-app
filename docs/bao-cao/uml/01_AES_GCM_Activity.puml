@@ -1,0 +1,29 @@
+@startuml
+title Hoat dong AES-256-GCM - Dispatch TEXT
+start
+:Chon hoi thoai va nhap plaintext;
+:Lay khoa AES theo userId va conversationId;
+if (Khoa hop le?) then (Co)
+  :Ma hoa UTF-8;
+  :Sinh IV ngau nhien 96 bit;
+  :AES-256-GCM Encrypt (tag 128 bit);
+  :POST ciphertext, iv, version;\ncontent = null;
+  :Backend kiem tra membership/format;
+  if (Hop le?) then (Co)
+    :TiDB luu ciphertext/iv;
+    :WebSocket phat ban ma cho thanh vien;
+    :Nguoi nhan lay AES key;
+    :AES-GCM Decrypt + xac thuc tag;
+    if (Tag/khoa/IV dung?) then (Dung)
+      :Hien plaintext;
+    else (Sai)
+      :Hien placeholder, giu ciphertext;
+    endif
+  else (Sai)
+    :HTTP 4xx, khong luu;
+  endif
+else (Khong)
+  :Bao loi khoa, khong gui;
+endif
+stop
+@enduml

@@ -1,0 +1,27 @@
+@startuml
+title Hoat dong SHA-256 kiem tra toan ven tep
+start
+:Chon tep dinh kem tren frontend;
+:SHA-256(file bytes) -> 64 ky tu hex;
+:POST multipart + expectedSha256;
+:Backend xac thuc membership;
+:Kiem tra kich thuoc/toi da 25 MB va dinh dang hash;
+if (Hop le?) then (Co)
+  :Ghi tep tam;
+  :SHA256.hashStream(file da nhan);
+  if (Digest khop?) then (Co)
+    :Upload vao Supabase Storage (private);
+    :Tra fileUrl, sha256;
+    if (Digest response khop frontend?) then (Co)
+      :Gui message IMAGE/FILE kem URL;
+    else (Khong)
+      :Bao loi toan ven;
+    endif
+  else (Khong)
+    :Xoa tep tam; HTTP 400;
+  endif
+else (Khong)
+  :Tu choi upload;
+endif
+stop
+@enduml

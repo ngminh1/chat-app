@@ -47,6 +47,8 @@ public void setElGamalKeyWrapService(
      * Backend biết key nên đây chỉ là cơ chế demo AES, CHƯA PHẢI E2EE.
      */
     
+// HOC QUAN LY KHOA: Check membership -> mo ban boc / khoa cu / sinh khoa neu chua co lich su;
+// khong thay khoa moi khi cuoc tro chuyen da co ciphertext.
 public synchronized AesKeyResponse getOrCreateConversationAesKey(
         Long conversationId, Long userId) {
 
@@ -390,6 +392,7 @@ private static boolean aesKeysEqual(String first, String second) {
         return result;
     }
 
+    // HOC LUU TIN: TEXT moi phai co ciphertext/IV/version; content=NULL trong TiDB.
     public MessageResponse sendMessage(SendMessageRequest request) {
         Conversation conversation = conversationRepository.findById(request.getConversationId())
                 .orElseThrow(() -> new RuntimeException("Cuộc trò chuyện không tồn tại"));
@@ -667,6 +670,7 @@ private static boolean aesKeysEqual(String first, String second) {
         return response;
     }
 
+    // HOC VALIDATE: Backend kiem tra dinh dang; GCM tag chi duoc xac thuc khi decrypt.
     private void validateEncryptedText(String ciphertext, String iv, String version) {
         if (version != null && !"AES-256-GCM".equals(version)) {
             throw new org.springframework.web.server.ResponseStatusException(

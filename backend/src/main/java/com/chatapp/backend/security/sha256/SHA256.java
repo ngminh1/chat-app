@@ -23,6 +23,7 @@ public final class SHA256 {
         return hashBytes(text.getBytes(StandardCharsets.UTF_8));
     }
 
+    // HOC SHA: MessageDigest SHA-256 tao 32 byte => bieu dien 64 ky tu hexadecimal.
     public static String hashBytes(byte[] data) {
         Objects.requireNonNull(data, "data");
         final byte[] digest;
@@ -44,6 +45,7 @@ public final class SHA256 {
      * Hash an input stream incrementally, avoiding loading uploaded files into memory.
      * The caller owns and closes the input stream.
      */
+    // HOC SHA: Xu ly file theo chunk 8 KiB, tranh nap ca file lon vao bo nho.
     public static String hashStream(InputStream input) throws IOException {
         Objects.requireNonNull(input, "input");
         final MessageDigest md;
@@ -69,6 +71,7 @@ public final class SHA256 {
     }
 
     /** Verify a known SHA-256 hex digest, using constant-time byte comparison. */
+    // HOC SHA: Hash phat hien bytes thay doi, nhung hash thuan khong xac thuc nguon gui.
     public static boolean verifyText(String text, String expectedHex) {
         Objects.requireNonNull(text, "text");
         Objects.requireNonNull(expectedHex, "expectedHex");

@@ -1,0 +1,39 @@
+@startuml
+title Sequence - ma hoa tin nhan va kiem tra tep tren Dispatch
+actor "Nguoi gui" as A
+participant "React A" as RA
+participant "Spring Boot" as BE
+database "TiDB" as DB
+participant "WebSocket" as WS
+participant "React B" as RB
+collections "Supabase" as SB
+== Tin nhan TEXT ==
+A -> RA: Nhap TEXT va nhan Gui
+RA -> BE: GET /conversations/{id}/aes-key (JWT)
+BE -> DB: Lay aes_key / wrapped_aes_key
+DB --> BE: Thong tin khoa
+note right of BE: Mo khoa ElGamal (neu co wrapped)\nBackend van biet raw AES key
+BE --> RA: AES key (neu du quyen)
+RA -> RA: Sinh IV; encrypt AES-256-GCM
+RA -> BE: POST /chat/messages (ciphertext, iv, version; content=null)
+BE -> DB: Luu ban ma
+BE -> WS: Publish DTO ban ma
+WS --> RB: Message ciphertext/iv
+RB -> BE: GET AES key hoi thoai (JWT)
+BE --> RB: AES key (neu du quyen)
+RB -> RB: Giai ma AES-GCM + verify tag
+RB --> A: Tin moi duoc hien thi ben nguoi nhan
+== Dinh kem / SHA-256 ==
+A -> RA: Chon tep
+RA -> RA: SHA-256(bytes)
+RA -> BE: POST /media/upload (file, sha256)
+BE -> BE: SHA-256(stream) va so sanh
+alt Hash dung / du quyen
+  BE -> SB: Luu tep
+  SB --> BE: OK
+  BE --> RA: URL, file size, sha256
+  RA -> BE: Gui IMAGE/FILE message
+else Hash sai
+  BE --> RA: HTTP 400; khong luu
+end
+@enduml

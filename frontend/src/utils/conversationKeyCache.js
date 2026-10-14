@@ -10,6 +10,7 @@ export function createConversationKeyCache(fetchKey) {
     async get(conversationId, userId) {
       if (!conversationId) throw new Error('Thiếu conversationId');
       if (!userId) throw new Error('Thiếu userId');
+      // HOC KHOA: Tach cache theo nguoi dung va cuoc tro chuyen.
       const cacheKey = `${userId}:${conversationId}`;
       if (entries.has(cacheKey)) return entries.get(cacheKey);
 
@@ -37,6 +38,7 @@ export function createConversationKeyCache(fetchKey) {
         throw error;
       }
     },
+    // HOC KHOA: Logout tang session, response lay khoa cu khong duoc dua sang phien moi.
     clear() {
       session += 1;
       entries.clear();

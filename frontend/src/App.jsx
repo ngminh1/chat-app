@@ -490,6 +490,7 @@ function ChatSession({ session, onLogout, isDarkMode, onToggleDarkMode }) {
   }, [activeConv?.conversationId, currentUser?.id, wsConnectionVersion, session]);
 
   // Gửi tin nhắn: TEXT được AES-256-GCM encrypt ở frontend trước khi gọi backend.
+  // HOC LUONG GUI: Browser lay AES key, ma hoa TEXT, gui ciphertext qua REST, backend phat WebSocket.
   const handleSendMessage = async (
     content,
     replyToId,
@@ -546,6 +547,7 @@ function ChatSession({ session, onLogout, isDarkMode, onToggleDarkMode }) {
       // Phase hiện tại chỉ mã hóa TEXT. IMAGE/FILE giữ nguyên behavior cũ.
       if (messageType === 'TEXT') {
         const key = await getSessionKey(activeConv.conversationId, currentUser.id);
+        // HOC LUONG GUI: Ma hoa truoc API request, khong gui plaintext cua tin TEXT.
         const encrypted = await encryptMessage(content || '', key);
         session.assertActive();
         requestContent = null; // Không gửi plaintext TEXT lên backend.
@@ -572,6 +574,7 @@ function ChatSession({ session, onLogout, isDarkMode, onToggleDarkMode }) {
       if (settingsRef.current.soundEnabled) soundManager.playOutgoingMessageSound();
 
       // REST response vẫn là ciphertext. Decrypt trước khi đưa lại vào UI state.
+      // HOC LUONG NHAN: REST response van la ban ma; UI giai ma truoc khi render.
       const serverMsg = await decryptMessagePayload(res.data);
       setMessages((prev) => {
         // Nếu WebSocket đã đưa serverMsg vào state trước REST response, chỉ bỏ optimistic.

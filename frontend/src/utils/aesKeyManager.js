@@ -3,6 +3,7 @@ import { API_BASE } from '../config/api';
 import { createConversationKeyCache } from './conversationKeyCache.js';
 
 // Cache key trong RAM để tránh gọi backend mỗi lần encrypt/decrypt.
+// HOC KHOA: Cache Promise theo (user, conversation), tranh tai cung khoa nhieu lan.
 const keyCache = createConversationKeyCache(async (conversationId, userId) => {
   const response = await axios.get(
     `${API_BASE}/chat/conversations/${conversationId}/aes-key`,
@@ -16,6 +17,7 @@ const keyCache = createConversationKeyCache(async (conversationId, userId) => {
  * Bản bọc ElGamal được xử lý ở backend; backend vẫn biết khóa nên CHƯA PHẢI E2EE.
  * Client chỉ cache trong RAM, không tạo hoặc thay khóa khi giải mã thất bại.
  */
+// HOC KHOA: Backend tra khoa AES cho thanh vien hop le; backend biet khoa => khong phai E2EE.
 export async function getConversationAESKey(conversationId, userId) {
   return keyCache.get(conversationId, userId);
 }

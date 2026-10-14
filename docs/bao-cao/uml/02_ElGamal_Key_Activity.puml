@@ -1,0 +1,44 @@
+@startuml
+title Hoat dong bao ve khoa AES bang ElGamal hybrid (server)
+start
+:Nguoi dung yeu cau khoa hoi thoai;
+:Backend xac thuc va kiem tra thanh vien;
+if (Du quyen?) then (Co)
+  :Doc aes_key va wrapped_aes_key;
+  if (Da co wrapped va ElGamal bat?) then (Co)
+    :Doc c1, salt, iv, ciphertext, keyId;
+    :Tinh shared secret = c1^x mod p;
+    :HKDF-SHA256 sinh khoa boc;
+    :AES-GCM unwrap va kiem tra AAD/tag;
+    if (Mo khoa/doi chieu thanh cong?) then (Co)
+      :Lay lai AES key;
+    else (Khong)
+      :Bao loi, KHONG thay khoa;
+      stop
+    endif
+  else (Chua)
+    if (Co raw AES key?) then (Co)
+      :Kiem tra key 32 byte;
+    else (Khong)
+      if (Hoi thoai co ciphertext cu?) then (Co)
+        :Bao loi mat khoa, KHONG tao lai;
+        stop
+      else (Khong)
+        :Sinh AES key 32 byte;
+      endif
+    endif
+    if (ElGamal bat va chua co wrapped?) then (Co)
+      :Sinh r; c1 = g^r mod p;
+      :Shared = y^r mod p;
+      :HKDF-SHA256 -> khoa boc;
+      :AES-GCM boc AES key va AAD;
+      :Tu unwrap kiem chung;
+      :Luu wrapped_aes_key;
+    endif
+  endif
+  :Tra khoa AES cho frontend hop le;
+else (Khong)
+  :Tu choi truy cap;
+endif
+stop
+@enduml

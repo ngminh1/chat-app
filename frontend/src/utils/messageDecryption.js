@@ -57,6 +57,7 @@ export function createMessageDecryptor({ getKey, logger = console }) {
     }
   }
 
+  // HOC GIAI MA: Kiem tra version, lay AES key roi decrypt ciphertext/IV tu API.
   async function readEnvelope(envelope, userId) {
     let stage = 'key';
     let failure;
@@ -82,6 +83,7 @@ export function createMessageDecryptor({ getKey, logger = console }) {
     clearFailures() {
       reportedFailures.clear();
     },
+    // HOC LICH SU: Giai ma tin chinh va reply; neu that bai chi hien placeholder, giu ciphertext.
     async decryptMessagePayload(message, userId) {
       if (!message || message.isDeleted) return message;
       const result = { ...message };

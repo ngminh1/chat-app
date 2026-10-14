@@ -22,6 +22,7 @@ export function bytesToText(bytes) {
   return new TextDecoder().decode(bytes);
 }
 
+// HOC AES: IV 96 bit phai moi cho moi lan ma hoa voi cung khoa; IV khong can bi mat.
 export function generateIV() {
   return crypto.getRandomValues(new Uint8Array(GCM_IV_LENGTH));
 }
@@ -75,6 +76,7 @@ export async function importAESKeyFromBase64(base64Key) {
   );
 }
 
+// HOC AES: UTF-8 -> Web Crypto AES-GCM -> ciphertext + tag 16 byte, IV va version (Base64).
 export async function encryptMessage(plaintext, key) {
   if (!key) throw new Error('Thiếu AES key');
 
@@ -99,6 +101,7 @@ export async function encryptMessage(plaintext, key) {
   };
 }
 
+// HOC AES: Sai khoa, IV hay tag se that bai xac thuc; khong tu tao khoa moi cho tin lich su.
 export async function decryptMessage(ciphertextBase64, ivBase64, key) {
   if (!key) throw new Error('Thiếu AES key');
   if (!ciphertextBase64 || !ivBase64) throw invalidCiphertext();

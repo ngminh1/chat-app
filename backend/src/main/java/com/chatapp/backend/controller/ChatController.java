@@ -38,6 +38,7 @@ public class ChatController {
         return ResponseEntity.ok().build();
     }
 
+    // HOC API KHOA: Xac thuc token va quyen thanh vien truoc khi tra khoa AES.
     @GetMapping("/conversations/{conversationId}/aes-key")
     public ResponseEntity<AesKeyResponse> getConversationAesKey(
             @PathVariable Long conversationId,
@@ -137,6 +138,7 @@ public class ChatController {
     }
 
     // Tin nhắn
+    // HOC API TIN: Frontend gui ciphertext/IV; ChatService validate, save, publish WebSocket.
     @PostMapping("/messages")
     public ResponseEntity<MessageResponse> sendMessage(@RequestBody SendMessageRequest request) {
         access.requireSelf(request.getSenderId());

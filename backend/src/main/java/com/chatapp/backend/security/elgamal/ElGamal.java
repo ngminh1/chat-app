@@ -64,6 +64,7 @@ public final class ElGamal {
             int version, String keyId, String c1, String salt, String iv, String ciphertext) {}
 
     /** Generate once, then securely persist privateKeyHex outside database and Git. */
+    // HOC ELGAMAL: Sinh khoa rieng x, khoa cong khai y = g^x mod p (nhom 3072 bit).
     public static KeyPair generateKeyPair(String keyId) {
         validateKeyId(keyId);
         BigInteger x = randomExponent();
@@ -72,6 +73,8 @@ public final class ElGamal {
     }
 
     /** Wrap an existing AES-256 conversation key for storage; never change its bytes. */
+    // HOC ELGAMAL HYBRID: r -> c1=g^r; shared=y^r; HKDF-SHA256 -> khoa boc;
+    // AES-GCM boc 32 byte AES key, AAD rang buoc keyId va conversationId.
     public static WrappedAesKey wrapKey(
             byte[] aesKey, String publicKeyHex, String keyId, long conversationId)
             throws GeneralSecurityException {
@@ -101,6 +104,7 @@ public final class ElGamal {
     }
 
     /** Unwrap only after JWT and conversation membership have been checked by ChatController. */
+    // HOC ELGAMAL: shared=c1^x; HKDF sinh lai khoa boc; AES-GCM decrypt + xac thuc tag.
     public static byte[] unwrapKey(
             WrappedAesKey wrapped, String privateKeyHex, long conversationId)
             throws GeneralSecurityException {
