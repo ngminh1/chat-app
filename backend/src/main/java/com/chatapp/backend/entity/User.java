@@ -15,7 +15,6 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @Builder
 public class User {
-
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -39,16 +38,17 @@ public class User {
     @Column(name = "last_seen_at")
     private LocalDateTime lastSeenAt;
 
-    /**
-     * ElGamal public key y của user ở dạng decimal string.
-     * Private key tuyệt đối không được gửi/lưu ở backend.
-     */
+    /** ElGamal public key; never store unencrypted ElGamal private key. */
     @Column(name = "elgamal_public_key", columnDefinition = "TEXT")
     private String elgamalPublicKey;
 
     @Builder.Default
     @Column(name = "elgamal_key_version")
     private Integer elgamalKeyVersion = 1;
+
+    /** Recovery-code-encrypted private key (JSON AES-256-GCM vault). */
+    @Column(name = "elgamal_vault", columnDefinition = "TEXT")
+    private String elgamalVault;
 
     @CreationTimestamp
     private LocalDateTime createdAt;
