@@ -121,16 +121,19 @@ public class FileStorageService {
         try {
             Path filePath = this.fileStorageLocation.resolve(fileName).normalize();
             if (!filePath.startsWith(this.fileStorageLocation) || !Files.isRegularFile(filePath)) {
-                throw new RuntimeException("Không tìm thấy tệp tin: " + fileName);
+                throw new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Tệp không còn tồn tại trên máy chủ");
             }
             Resource resource = new UrlResource(filePath.toUri());
             if (resource.exists()) {
                 return resource;
             } else {
-                throw new RuntimeException("Không tìm thấy tệp tin: " + fileName);
+                throw new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Tệp không còn tồn tại trên máy chủ");
             }
         } catch (MalformedURLException ex) {
-            throw new RuntimeException("Không tìm thấy tệp tin: " + fileName, ex);
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.NOT_FOUND, "Đường dẫn tệp không hợp lệ", ex);
         }
     }
 }
