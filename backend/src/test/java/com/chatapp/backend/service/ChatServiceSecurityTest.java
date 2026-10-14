@@ -16,13 +16,16 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.web.server.ResponseStatusException;
-
+import com.chatapp.backend.security.elgamal.ElGamal;
+import com.chatapp.backend.security.elgamal.ElGamalKeyWrapService;
+import tools.jackson.databind.ObjectMapper;
 import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
 
 class ChatServiceSecurityTest {
@@ -128,4 +131,103 @@ class ChatServiceSecurityTest {
                 assertThrows(ResponseStatusException.class, () -> service.sendMessage(request)).getStatusCode());
         verify(messages, never()).save(any(Message.class));
     }
+    
+private void prepareKeyAccess() {
+    when(conversations.findById(10L))
+            .thenReturn(Optional.of(conversation));
+
+    when(members.findByConversationIdAndUserId(10L, 1L))
+            .thenReturn(Optional.of(
+                    ConversationMember.builder().build()
+            ));
+}
+
+private ElGamalKeyWrapService enableElGamal() {
+    var keys = ElGamal.generateKeyPair("server-v1");
+    var wrapper = new ElGamalKeyWrapService(
+            keys, new ObjectMapper()
+    );
+    service.setElGamalKeyWrapService(wrapper);
+    return wrapper;
+}
+
+@Test
+void existingAesKeyIsWrappedWithoutChangingIt() {
+    prepareKeyAccess();
+    var wrapper = enableElGamal();
+
+    String original = Base64.getEncoder()
+            .encodeToString(new byte[32]);
+
+    conversation.setAesKey(original);
+
+    var response = service.getOrCreateConversationAesKey(10L, 1L);
+
+    assertEquals(original, response.getKey());
+    assertNotNull(conversation.getWrappedAesKey());
+    assertEquals(original, wrapper.unwrap(
+            conversation.getWrappedAesKey(), 10L
+    ));
+
+    verify(conversations).save(conversation);
+}
+
+@Test
+void wrappedKeyWorksWithoutRawKey() {
+    prepareKeyAccess();
+    var wrapper = enableElGamal();
+
+    String original = Base64.getEncoder()
+            .encodeToString(new byte[32]);
+
+    conversation.setWrappedAesKey(wrapper.wrap(original, 10L));
+    conversation.setAesKey(null);
+
+    var response = service.getOrCreateConversationAesKey(10L, 1L);
+
+    assertEquals(original, response.getKey());
+    verify(conversations, never()).save(any());
+}
+
+@Test
+void corruptedWrappedKeyMustNotUseRawFallback() {
+    prepareKeyAccess();
+    enableElGamal();
+
+    conversation.setAesKey(
+            Base64.getEncoder().encodeToString(new byte[32])
+    );
+    conversation.setWrappedAesKey("{invalid-json");
+
+    assertThrows(RuntimeException.class, () ->
+            service.getOrCreateConversationAesKey(10L, 1L)
+    );
+
+    verify(conversations, never()).save(any());
+}
+
+@Test
+void mismatchedAesKeysMustFail() {
+    prepareKeyAccess();
+    var wrapper = enableElGamal();
+
+    byte[] first = new byte[32];
+    byte[] second = new byte[32];
+    second[0] = 1;
+
+    conversation.setAesKey(
+            Base64.getEncoder().encodeToString(first)
+    );
+
+    conversation.setWrappedAesKey(wrapper.wrap(
+            Base64.getEncoder().encodeToString(second), 10L
+    ));
+
+    assertThrows(IllegalStateException.class, () ->
+            service.getOrCreateConversationAesKey(10L, 1L)
+    );
+
+    verify(conversations, never()).save(any());
+}
+
 }
