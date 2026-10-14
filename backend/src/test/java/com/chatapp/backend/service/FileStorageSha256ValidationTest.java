@@ -30,6 +30,20 @@ class FileStorageSha256ValidationTest {
     }
 
     @Test
+    void missingFileReturnsNotFoundInsteadOfInternalServerError() {
+        var missing = assertThrows(ResponseStatusException.class,
+                () -> storage.loadFileAsResource("attachment-1-no-longer-exists.png"));
+        assertEquals(HttpStatus.NOT_FOUND, missing.getStatusCode());
+    }
+
+    @Test
+    void traversalAttemptIsNotExposedAsServerError() {
+        var missing = assertThrows(ResponseStatusException.class,
+                () -> storage.loadFileAsResource("../private.txt"));
+        assertEquals(HttpStatus.NOT_FOUND, missing.getStatusCode());
+    }
+
+    @Test
     void validDigestIsReturnedWithUploadedFile() throws IOException {
         byte[] payload = "Dispatch SHA-256 upload".getBytes(java.nio.charset.StandardCharsets.UTF_8);
         String digest = SHA256.hashBytes(payload);
