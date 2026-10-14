@@ -48,9 +48,9 @@ class FileStorageSha256ValidationTest {
     }
 
     @Test
-    void r2UploadVerifiesDigestAndRemovesTemporaryFile() throws IOException {
+    void supabaseUploadVerifiesDigestAndRemovesTemporaryFile() throws IOException {
         byte[] payload = "SHA256-R2".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        R2MediaStorage r2 = mock(R2MediaStorage.class);
+        SupabaseMediaStorage storageMock = mock(SupabaseMediaStorage.class);
         AtomicReference<byte[]> uploadedBytes = new AtomicReference<>();
         AtomicReference<Path> uploadedPath = new AtomicReference<>();
         doAnswer(invocation -> {
@@ -58,15 +58,15 @@ class FileStorageSha256ValidationTest {
             uploadedPath.set(path);
             uploadedBytes.set(Files.readAllBytes(path));
             return null;
-        }).when(r2).upload(any(Path.class), anyString(), anyString());
+        }).when(storageMock).upload(any(Path.class), anyString(), anyString());
 
-        storage = new FileStorageService(tempDir, r2);
+        storage = new FileStorageService(tempDir, storageMock);
         String expected = SHA256.hashBytes(payload);
         var result = storage.storeFile(file(payload), false, 1L, expected);
 
         assertEquals(expected, result.getSha256());
         assertArrayEquals(payload, uploadedBytes.get());
-        verify(r2).upload(any(Path.class), startsWith("attachment-1-"), eq("text/plain"));
+        verify(storageMock).upload(any(Path.class), startsWith("attachment-1-"), eq("text/plain"));
         assertFalse(Files.exists(uploadedPath.get()));
         try (var saved = Files.list(tempDir)) {
             assertEquals(0, saved.count());
@@ -74,33 +74,33 @@ class FileStorageSha256ValidationTest {
     }
 
     @Test
-    void r2IsNotCalledWhenDigestDoesNotMatch() {
-        R2MediaStorage r2 = mock(R2MediaStorage.class);
-        storage = new FileStorageService(tempDir, r2);
+    void supabaseIsNotCalledWhenDigestDoesNotMatch() {
+        SupabaseMediaStorage storageMock = mock(SupabaseMediaStorage.class);
+        storage = new FileStorageService(tempDir, storageMock);
         assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
                 () -> storage.storeFile(file(new byte[] {1}), false, 1L,
                         SHA256.hashBytes(new byte[] {2}))).getStatusCode());
-        verifyNoInteractions(r2);
+        verifyNoInteractions(storageMock);
     }
 
     @Test
-    void r2DownloadsPassThroughStorageService() {
-        R2MediaStorage r2 = mock(R2MediaStorage.class);
-        storage = new FileStorageService(tempDir, r2);
+    void supabaseDownloadsPassThroughStorageService() {
+        SupabaseMediaStorage storageMock = mock(SupabaseMediaStorage.class);
+        storage = new FileStorageService(tempDir, storageMock);
         String name = "attachment-1-present.png";
         var resource = new ByteArrayResource(new byte[] {1, 2, 3});
-        when(r2.loadFileAsResource(name)).thenReturn(resource);
+        when(storageMock.loadFileAsResource(name)).thenReturn(resource);
         assertSame(resource, storage.loadFileAsResource(name));
     }
 
     @Test
-    void localFileCanBeReadDuringR2Migration() throws IOException {
-        R2MediaStorage r2 = mock(R2MediaStorage.class);
-        storage = new FileStorageService(tempDir, r2);
+    void localFileCanBeReadDuringSupabaseMigration() throws IOException {
+        SupabaseMediaStorage storageMock = mock(SupabaseMediaStorage.class);
+        storage = new FileStorageService(tempDir, storageMock);
         String name = "attachment-1-legacy.png";
         byte[] oldContent = {7, 8, 9};
         Files.write(tempDir.resolve(name), oldContent);
-        when(r2.loadFileAsResource(name)).thenThrow(
+        when(storageMock.loadFileAsResource(name)).thenThrow(
                 new ResponseStatusException(HttpStatus.NOT_FOUND));
 
         try (var data = storage.loadFileAsResource(name).getInputStream()) {
