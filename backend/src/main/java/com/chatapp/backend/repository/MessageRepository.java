@@ -11,6 +11,10 @@ import java.util.List;
 
 public interface MessageRepository extends JpaRepository<Message, Long> {
 
+    boolean existsByConversationIdAndCiphertextIsNotNull(Long conversationId);
+
+    List<Message> findByMediaUrlAndIsDeletedFalse(String mediaUrl);
+
     List<Message> findByConversationIdOrderByCreatedAtAsc(Long conversationId);
 
     List<Message> findByConversationIdOrderByCreatedAtDesc(Long conversationId);

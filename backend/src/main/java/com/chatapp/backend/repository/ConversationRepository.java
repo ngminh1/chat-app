@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import java.util.List;
 
 public interface ConversationRepository extends JpaRepository<Conversation, Long> {
+    boolean existsByAvatarUrl(String avatarUrl);
 
     @Query("""
         SELECT c FROM Conversation c 

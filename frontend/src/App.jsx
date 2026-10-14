@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
@@ -35,6 +35,7 @@ export default function App() {
   });
 
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const [wsConnectionVersion, setWsConnectionVersion] = useState(0);
 
   const [conversations, setConversations] = useState([]);
   const [isLoadingConversations, setIsLoadingConversations] = useState(false);
@@ -47,7 +48,7 @@ export default function App() {
   const [lastSeenMap, setLastSeenMap] = useState({});
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
+  const [searchResults, setSearchResults] = useState({ query: '', items: [] });
 
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('chat_settings');
@@ -58,7 +59,7 @@ export default function App() {
 
   // Lưu settings vào ref để callback WebSocket đọc trực tiếp mà không cần khởi tạo lại socket
   const settingsRef = useRef(settings);
-  settingsRef.current = settings;
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
 
   const [activeToast, setActiveToast] = useState(null);
 
@@ -80,10 +81,10 @@ export default function App() {
   const [forwardingMessage, setForwardingMessage] = useState(null);
 
   const activeConvRef = useRef(null);
-  activeConvRef.current = activeConv;
+  useEffect(() => { activeConvRef.current = activeConv; }, [activeConv]);
 
   const conversationsRef = useRef([]);
-  conversationsRef.current = conversations;
+  useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
 
   const stompClientRef = useRef(null);
 
@@ -184,9 +185,11 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    if (currentUser) {
+    const token = localStorage.getItem('auth_token');
+    if (currentUser && token) {
       axios.put(`${API_BASE}/chat/presence`, null, {
-        params: { userId: currentUser.id, isOnline: false }
+        params: { userId: currentUser.id, isOnline: false },
+        headers: { Authorization: `Bearer ${token}` }
       }).catch(() => {});
     }
     localStorage.removeItem('auth_token');
@@ -224,9 +227,9 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (currentUser?.id) {
-      fetchConversations(currentUser.id);
-    }
+    if (!currentUser?.id) return;
+    const timer = setTimeout(() => fetchConversations(currentUser.id), 0);
+    return () => clearTimeout(timer);
   }, [currentUser?.id]);
 
   const handleSelectConversation = async (conv) => {
@@ -282,10 +285,14 @@ export default function App() {
 
     const client = new Client({
       webSocketFactory: () => new SockJS(WS_URL),
+      connectHeaders: {
+        Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}`
+      },
       debug: () => {},
       reconnectDelay: 5000,
       onConnect: () => {
         setIsReconnecting(false);
+        setWsConnectionVersion((version) => version + 1);
 
         axios.put(`${API_BASE}/chat/presence`, null, {
           params: { userId: currentUser.id, isOnline: true }
@@ -301,6 +308,23 @@ export default function App() {
 
         client.subscribe(`/topic/users/${currentUser.id}/messages`, async (msgFrame) => {
           const encryptedMsg = JSON.parse(msgFrame.body);
+          if (encryptedMsg.event === 'GROUP_REMOVED') {
+            const id = Number(encryptedMsg.conversationId);
+            setConversations((prev) => prev.filter((c) => Number(c.conversationId) !== id));
+            if (Number(activeConvRef.current?.conversationId) === id) {
+              setActiveConv(null);
+              setMessages([]);
+              setIsGroupDetailModalOpen(false);
+              setTypingUser(null);
+              localStorage.removeItem('active_conv_id');
+            }
+            clearAESKeyCache();
+            return;
+          }
+          if (encryptedMsg.event === 'GROUP_MEMBERS_CHANGED') {
+            fetchConversations(currentUser.id);
+            return;
+          }
           const newMsg = await decryptMessagePayload(encryptedMsg);
           const currentActive = activeConvRef.current;
           const isCurrentlyActiveRoom = currentActive && currentActive.conversationId === newMsg.conversationId;
@@ -393,16 +417,9 @@ export default function App() {
     client.activate();
     stompClientRef.current = client;
 
-    const handleBeforeUnload = () => {
-      navigator.sendBeacon(
-        `${API_BASE}/chat/presence?userId=${currentUser.id}&isOnline=false`
-      );
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
     return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      if (stompClientRef.current) stompClientRef.current.deactivate();
+      client.deactivate();
+      if (stompClientRef.current === client) stompClientRef.current = null;
     };
   }, [currentUser?.id]);
 
@@ -447,7 +464,7 @@ export default function App() {
       if (typingSub) typingSub.unsubscribe();
       if (themeSub) themeSub.unsubscribe();
     };
-  }, [activeConv?.conversationId, currentUser?.id]);
+  }, [activeConv?.conversationId, currentUser?.id, wsConnectionVersion]);
 
   // Gửi tin nhắn: TEXT được AES-256-GCM encrypt ở frontend trước khi gọi backend.
   const handleSendMessage = async (
@@ -693,23 +710,23 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!searchQuery.trim() || !currentUser?.id) {
-      setSearchResults([]);
-      return;
-    }
+    const query = searchQuery.trim();
+    if (!query || !currentUser?.id) return;
 
+    const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
         const res = await axios.get(`${API_BASE}/users/search`, {
-          params: { query: searchQuery.trim(), currentUserId: currentUser.id }
+          params: { query, currentUserId: currentUser.id },
+          signal: controller.signal
         });
-        setSearchResults(res.data);
+        setSearchResults({ query, items: res.data });
       } catch (err) {
-        console.error("Lỗi tìm kiếm user:", err);
+        if (err.code !== 'ERR_CANCELED') console.error("Lỗi tìm kiếm user:", err);
       }
     }, 300);
 
-    return () => clearTimeout(timer);
+    return () => { clearTimeout(timer); controller.abort(); };
   }, [searchQuery, currentUser?.id]);
 
   const handleStartChatWithUser = async (targetUser) => {
@@ -734,7 +751,6 @@ export default function App() {
 
       handleSelectConversation(selectedConv);
       setSearchQuery('');
-      setSearchResults([]);
       fetchConversations(currentUser.id);
     } catch (err) {
       console.error("Lỗi tạo phòng chat:", err);
@@ -819,7 +835,7 @@ export default function App() {
           onSelectConversation={handleSelectConversation}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
-          searchResults={searchResults}
+          searchResults={searchResults.query === searchQuery.trim() ? searchResults.items : []}
           onSelectUserToChat={handleStartChatWithUser}
           onSendFriendRequest={handleSendFriendRequest}
           onOpenFriendsModal={() => setIsFriendsModalOpen(true)}

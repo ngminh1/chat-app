@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
+import ProtectedMediaImage from './ProtectedMediaImage';
+import { publicMediaUrl } from '../utils/mediaAccess';
 import {
   X,
   Share2,
@@ -87,7 +89,7 @@ export default function ForwardModal({
             </span>
             {messageToForward.messageType === 'IMAGE' ? (
               <div className="flex items-center gap-2">
-                <img src={messageToForward.mediaUrl} alt="" className="w-12 h-12 rounded-lg object-cover border border-slate-300 dark:border-slate-700" />
+                <ProtectedMediaImage src={messageToForward.mediaUrl} alt="" className="w-12 h-12 rounded-lg object-cover border border-slate-300 dark:border-slate-700" />
                 <span className="truncate">{messageToForward.content || '[Hình ảnh]'}</span>
               </div>
             ) : messageToForward.messageType === 'FILE' ? (
@@ -138,7 +140,7 @@ export default function ForwardModal({
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
                     {avatar ? (
-                      <img src={avatar} alt="" className="w-8 h-8 rounded-full object-cover border border-slate-200 dark:border-slate-700" />
+                      <img src={publicMediaUrl(avatar)} alt="" className="w-8 h-8 rounded-full object-cover border border-slate-200 dark:border-slate-700" />
                     ) : (
                       <div className={`w-8 h-8 rounded-full text-white flex items-center justify-center font-bold text-xs shadow-xs ${
                         isGroup ? 'bg-purple-600' : 'bg-gradient-to-tr from-[#0062FF] to-sky-400'

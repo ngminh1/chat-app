@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
   X,
@@ -12,13 +12,14 @@ import {
 } from 'lucide-react';
 import { formatSidebarTime } from '../utils/formatTime';
 import { API_BASE } from '../config/api';
+import ProtectedMediaImage from './ProtectedMediaImage';
+import { downloadMedia } from '../utils/mediaAccess';
 
 export default function MediaGalleryModal({
   isOpen,
   onClose,
   conversationId,
   conversationTitle,
-  onJumpToMessage,
   isDarkMode
 }) {
   const [activeTab, setActiveTab] = useState('images');
@@ -125,7 +126,7 @@ export default function MediaGalleryModal({
                     className="relative group aspect-square rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800 cursor-pointer shadow-xs"
                     onClick={() => setPreviewImg(item.mediaUrl)}
                   >
-                    <img src={item.mediaUrl} alt="" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                    <ProtectedMediaImage src={item.mediaUrl} alt="" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2">
                       <div className="flex justify-end">
                         <span className="p-1 bg-black/40 rounded-full text-white backdrop-blur-xs">
@@ -175,16 +176,14 @@ export default function MediaGalleryModal({
                     </div>
 
                     <div className="flex items-center gap-1.5 flex-shrink-0">
-                      <a
-                        href={item.mediaUrl}
-                        download={item.fileName}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
+                        type="button"
+                        onClick={() => downloadMedia(item.mediaUrl, item.fileName).catch(console.error)}
                         className="p-1.5 bg-white dark:bg-slate-700 hover:bg-[#0062FF] hover:text-white text-[#0062FF] dark:text-slate-200 rounded-lg shadow-xs transition-colors"
                         title="Tải về"
                       >
                         <Download className="w-4 h-4" />
-                      </a>
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -200,7 +199,7 @@ export default function MediaGalleryModal({
           <button onClick={() => setPreviewImg(null)} className="absolute top-4 right-4 p-2 text-white/80 hover:text-white bg-white/10 rounded-full cursor-pointer">
             <X className="w-6 h-6" />
           </button>
-          <img src={previewImg} alt="" className="max-h-[90vh] max-w-[90vw] object-contain rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()} />
+          <ProtectedMediaImage src={previewImg} alt="" className="max-h-[90vh] max-w-[90vw] object-contain rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()} />
         </div>
       )}
     </div>

@@ -4,6 +4,7 @@ import com.chatapp.backend.dto.UpdateProfileRequest;
 import com.chatapp.backend.dto.UserResponse;
 import com.chatapp.backend.entity.User;
 import com.chatapp.backend.repository.UserRepository;
+import com.chatapp.backend.security.MediaUrls;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,6 +43,9 @@ public class UserService {
             user.setDisplayName(request.getDisplayName().trim());
         }
         if (request.getAvatarUrl() != null) {
+            if (!request.getAvatarUrl().equals(user.getAvatarUrl())) {
+                MediaUrls.requirePublicAvatarUrl(request.getAvatarUrl());
+            }
             user.setAvatarUrl(request.getAvatarUrl().trim());
         }
 

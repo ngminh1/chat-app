@@ -1,5 +1,3 @@
-import React from 'react';
-
 export default function DispatchLogo({ size = 32, showText = false, layout = 'horizontal', className = '' }) {
   if (showText) {
     if (layout === 'vertical') {

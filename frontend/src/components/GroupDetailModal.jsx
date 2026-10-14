@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
   X,
@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { CHAT_THEMES } from '../utils/themeConfig';
 import { API_BASE } from '../config/api';
+import { publicMediaUrl } from '../utils/mediaAccess';
 
 export default function GroupDetailModal({
   isOpen,
@@ -203,7 +204,7 @@ export default function GroupDetailModal({
           <div className="flex flex-col items-center text-center">
             {targetAvatarUrl ? (
               <img
-                src={targetAvatarUrl}
+                src={publicMediaUrl(targetAvatarUrl)}
                 alt=""
                 className="w-16 h-16 rounded-full object-cover border border-slate-200 dark:border-slate-700 shadow-xs mb-2.5 flex-shrink-0"
               />
@@ -370,7 +371,7 @@ export default function GroupDetailModal({
                     <div key={m.userId} className="p-2.5 flex items-center justify-between rounded-lg">
                       <div className="flex items-center gap-2.5 min-w-0">
                         {m.avatarUrl ? (
-                          <img src={m.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
+                          <img src={publicMediaUrl(m.avatarUrl)} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
                         ) : (
                           <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center font-bold text-xs flex-shrink-0">
                             {m.displayName.charAt(0).toUpperCase()}

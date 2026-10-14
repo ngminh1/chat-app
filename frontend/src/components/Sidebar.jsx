@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import { useState, useRef } from 'react';
 import {
   Search,
   Users,
@@ -15,6 +15,7 @@ import {
 import { formatSidebarTime } from '../utils/formatTime';
 import { SidebarSkeleton } from './Skeletons';
 import DispatchLogo from './DispatchLogo';
+import { publicMediaUrl } from '../utils/mediaAccess';
 
 export default function Sidebar({
   currentUser,
@@ -142,7 +143,7 @@ export default function Sidebar({
           <div className="relative flex-shrink-0">
             {currentUser?.avatarUrl ? (
               <img
-                src={currentUser.avatarUrl}
+                src={publicMediaUrl(currentUser.avatarUrl)}
                 alt=""
                 className="w-8 h-8 rounded-full object-cover border border-slate-200 dark:border-slate-700"
               />
@@ -221,7 +222,7 @@ export default function Sidebar({
                   onClick={() => onSelectUserToChat(user)}
                 >
                   {user.avatarUrl ? (
-                    <img src={user.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
+                      <img src={publicMediaUrl(user.avatarUrl)} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
                   ) : (
                     <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center font-bold text-xs flex-shrink-0">
                       {user.displayName.charAt(0).toUpperCase()}
@@ -310,7 +311,7 @@ export default function Sidebar({
                   <div className="relative flex-shrink-0">
                     {avatar ? (
                       <img
-                        src={avatar}
+                        src={publicMediaUrl(avatar)}
                         alt=""
                         className="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700"
                       />

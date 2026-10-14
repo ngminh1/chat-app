@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { X, User, Camera, Save, Loader2, Volume2, Bell, MessageSquare } from 'lucide-react';
 import { requestNotificationPermission } from '../utils/browserNotifications';
 import { API_BASE } from '../config/api';
+import { publicMediaUrl } from '../utils/mediaAccess';
 
 export default function ProfileModal({
   isOpen,
@@ -63,6 +64,7 @@ export default function ProfileModal({
         formData.append('file', selectedAvatarFile);
 
         const uploadRes = await axios.post(`${API_BASE}/media/upload`, formData, {
+          params: { purpose: 'avatar' },
           headers: { 'Content-Type': 'multipart/form-data' }
         });
         finalAvatarUrl = uploadRes.data.fileUrl;
@@ -140,7 +142,7 @@ export default function ProfileModal({
               <input
                 type="file"
                 ref={fileInputRef}
-                accept="image/*"
+                accept="image/png,image/jpeg,image/gif,image/webp"
                 className="hidden"
                 onChange={handleFileChange}
               />
@@ -153,7 +155,7 @@ export default function ProfileModal({
                   />
                 ) : currentAvatarUrl ? (
                   <img
-                    src={currentAvatarUrl}
+                    src={publicMediaUrl(currentAvatarUrl)}
                     alt=""
                     className="w-20 h-20 rounded-full object-cover border-2 border-[#0062FF] shadow-xs"
                   />

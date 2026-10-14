@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { X, Users, Check, Search, Loader2, UserPlus, Camera } from 'lucide-react';
 import { API_BASE } from '../config/api';
+import { publicMediaUrl } from '../utils/mediaAccess';
 
 export default function CreateGroupModal({ isOpen, onClose, currentUserId, onGroupCreated }) {
   const [groupTitle, setGroupTitle] = useState('');
@@ -76,6 +77,7 @@ export default function CreateGroupModal({ isOpen, onClose, currentUserId, onGro
         const formData = new FormData();
         formData.append('file', selectedAvatarFile);
         const uploadRes = await axios.post(`${API_BASE}/media/upload`, formData, {
+          params: { purpose: 'avatar' },
           headers: { 'Content-Type': 'multipart/form-data' }
         });
         uploadedAvatarUrl = uploadRes.data.fileUrl;
@@ -132,7 +134,7 @@ export default function CreateGroupModal({ isOpen, onClose, currentUserId, onGro
             <input
               type="file"
               ref={fileInputRef}
-              accept="image/*"
+              accept="image/png,image/jpeg,image/gif,image/webp"
               className="hidden"
               onChange={handleAvatarChange}
             />
@@ -225,7 +227,7 @@ export default function CreateGroupModal({ isOpen, onClose, currentUserId, onGro
                       <div className="flex items-center gap-3">
                         {item.user.avatarUrl ? (
                           <img
-                            src={item.user.avatarUrl}
+                            src={publicMediaUrl(item.user.avatarUrl)}
                             alt=""
                             className="w-8 h-8 rounded-full object-cover border border-slate-200 dark:border-slate-700"
                           />

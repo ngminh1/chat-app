@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
   X,
@@ -12,6 +12,7 @@ import {
   Inbox
 } from 'lucide-react';
 import { API_BASE } from '../config/api';
+import { publicMediaUrl } from '../utils/mediaAccess';
 
 export default function FriendsModal({
   isOpen,
@@ -56,7 +57,7 @@ export default function FriendsModal({
     try {
       await axios.put(`${API_BASE}/friends/${friendshipId}/accept`);
       await fetchFriendsAndRequests();
-    } catch (err) {
+    } catch {
       alert("Lỗi khi chấp nhận lời mời");
     } finally {
       setActionLoadingId(null);
@@ -68,7 +69,7 @@ export default function FriendsModal({
     try {
       await axios.put(`${API_BASE}/friends/${friendshipId}/decline`);
       await fetchFriendsAndRequests();
-    } catch (err) {
+    } catch {
       alert("Lỗi khi từ chối lời mời");
     } finally {
       setActionLoadingId(null);
@@ -81,7 +82,7 @@ export default function FriendsModal({
     try {
       await axios.delete(`${API_BASE}/friends/${friendshipId}`);
       await fetchFriendsAndRequests();
-    } catch (err) {
+    } catch {
       alert("Lỗi khi hủy kết bạn");
     } finally {
       setActionLoadingId(null);
@@ -167,7 +168,7 @@ export default function FriendsModal({
                 >
                   <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     {item.user.avatarUrl ? (
-                      <img src={item.user.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
+                      <img src={publicMediaUrl(item.user.avatarUrl)} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
                     ) : (
                       <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#0062FF] to-sky-400 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
                         {item.user.displayName.charAt(0).toUpperCase()}
@@ -218,7 +219,7 @@ export default function FriendsModal({
                 >
                   <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     {item.user.avatarUrl ? (
-                      <img src={item.user.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
+                      <img src={publicMediaUrl(item.user.avatarUrl)} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
                     ) : (
                       <div className="w-8 h-8 rounded-full bg-amber-500 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
                         {item.user.displayName.charAt(0).toUpperCase()}

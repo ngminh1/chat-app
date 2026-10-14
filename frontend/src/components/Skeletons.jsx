@@ -1,5 +1,3 @@
-import React from 'react';
-
 export function SidebarSkeleton({ isDarkMode }) {
   return (
     <div className="p-3 space-y-3 animate-pulse">

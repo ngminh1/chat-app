@@ -3,10 +3,13 @@ package com.chatapp.backend.service;
 import com.chatapp.backend.dto.*;
 import com.chatapp.backend.entity.*;
 import com.chatapp.backend.repository.*;
+import com.chatapp.backend.security.MediaUrls;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.security.SecureRandom;
@@ -14,6 +17,7 @@ import java.util.Base64;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -42,6 +46,11 @@ public class ChatService {
                 .orElseThrow(() -> new RuntimeException("Bạn không phải thành viên của cuộc trò chuyện này"));
 
         if (conversation.getAesKey() == null || conversation.getAesKey().isBlank()) {
+            // Không thay khóa của hội thoại đã có ciphertext; khóa cũ có thể chỉ còn trong bản sao lưu.
+            boolean hasEncryptedHistory = messageRepository.existsByConversationIdAndCiphertextIsNotNull(conversationId);
+            if (hasEncryptedHistory) {
+                throw new IllegalStateException("Hội thoại có tin mã hóa nhưng thiếu khóa AES gốc");
+            }
             byte[] rawKey = new byte[32]; // 256 bit
             new SecureRandom().nextBytes(rawKey);
             conversation.setAesKey(Base64.getEncoder().encodeToString(rawKey));
@@ -119,6 +128,7 @@ public class ChatService {
     }
 
     public Conversation createGroupChat(CreateGroupChatRequest request) {
+        MediaUrls.requirePublicAvatarUrl(request.getAvatarUrl());
         User creator = userRepository.findById(request.getCreatorId())
                 .orElseThrow(() -> new RuntimeException("Người tạo nhóm không tồn tại"));
 
@@ -202,6 +212,7 @@ public class ChatService {
         User currentUser = currentMember.getUser();
 
         conversationMemberRepository.delete(targetMember);
+        notifyMembershipChangeAfterCommit(conv.getId(), targetUserId);
         sendSystemMessage(conv, currentUser, currentUser.getDisplayName() + " đã xóa " + targetUser.getDisplayName() + " khỏi nhóm");
     }
 
@@ -212,6 +223,7 @@ public class ChatService {
 
         User user = member.getUser();
         conversationMemberRepository.delete(member);
+        notifyMembershipChangeAfterCommit(conv.getId(), userId);
 
         List<ConversationMember> remainingMembers = conversationMemberRepository.findByConversationId(conv.getId());
         if (remainingMembers.isEmpty()) {
@@ -240,6 +252,9 @@ public class ChatService {
             conv.setTitle(request.getTitle().trim());
         }
         if (request.getAvatarUrl() != null) {
+            if (!request.getAvatarUrl().equals(conv.getAvatarUrl())) {
+                MediaUrls.requirePublicAvatarUrl(request.getAvatarUrl());
+            }
             conv.setAvatarUrl(request.getAvatarUrl().trim());
         }
 
@@ -270,19 +285,41 @@ public class ChatService {
         Conversation conversation = conversationRepository.findById(request.getConversationId())
                 .orElseThrow(() -> new RuntimeException("Cuộc trò chuyện không tồn tại"));
 
+        requireConversationMember(conversation.getId(), request.getSenderId());
+
         User sender = userRepository.findById(request.getSenderId())
                 .orElseThrow(() -> new RuntimeException("Người gửi không tồn tại"));
 
         Message replyToMessage = null;
         if (request.getReplyToId() != null) {
             replyToMessage = messageRepository.findById(request.getReplyToId()).orElse(null);
+            if (replyToMessage != null && !replyToMessage.getConversation().getId().equals(conversation.getId())) {
+                throw new IllegalArgumentException("Không được reply tin nhắn từ hội thoại khác");
+            }
         }
 
         MessageType type = request.getMessageType() != null ? request.getMessageType() : MessageType.TEXT;
+        if (type == MessageType.SYSTEM) {
+            throw new IllegalArgumentException("Chỉ backend mới được tạo thông báo SYSTEM");
+        }
+        if ((type == MessageType.IMAGE || type == MessageType.FILE) &&
+                (request.getMediaUrl() == null ||
+                 !request.getMediaUrl().startsWith(MediaUrls.attachmentPrefix(conversation.getId())))) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "File đính kèm không thuộc hội thoại này");
+        }
 
         boolean encryptedText = type == MessageType.TEXT
                 && request.getCiphertext() != null && !request.getCiphertext().isBlank()
                 && request.getIv() != null && !request.getIv().isBlank();
+
+        if (type == MessageType.TEXT && !encryptedText) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "Tin nhắn TEXT phải được mã hóa AES-GCM");
+        }
+        if (encryptedText) {
+            validateEncryptedText(request.getCiphertext(), request.getIv(), request.getEncryptionVersion());
+        }
 
         Message message = Message.builder()
                 .conversation(conversation)
@@ -329,6 +366,10 @@ public class ChatService {
     public List<MessageResponse> forwardMessage(ForwardMessageRequest request) {
         Message originalMessage = messageRepository.findById(request.getMessageId())
                 .orElseThrow(() -> new RuntimeException("Tin nhắn không tồn tại"));
+
+        if (originalMessage.getMessageType() == MessageType.TEXT) {
+            throw new IllegalArgumentException("Chuyển tiếp TEXT phải mã hóa lại bằng khóa của hội thoại đích ở client");
+        }
 
         if (Boolean.TRUE.equals(originalMessage.getIsDeleted())) {
             throw new RuntimeException("Không thể chuyển tiếp tin nhắn đã bị thu hồi");
@@ -454,9 +495,37 @@ public class ChatService {
                 .orElseThrow(() -> new RuntimeException("Bạn không phải là thành viên trong nhóm này"));
     }
 
+    private void requireConversationMember(Long convId, Long userId) {
+        conversationMemberRepository.findByConversationIdAndUserId(convId, userId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.FORBIDDEN, "Không thuộc hội thoại"));
+    }
+
+    private void notifyMembershipChangeAfterCommit(Long conversationId, Long removedUserId) {
+        List<Long> remainingIds = conversationMemberRepository.findByConversationId(conversationId)
+                .stream().map(m -> m.getUser().getId())
+                .filter(id -> !id.equals(removedUserId)).toList();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                messagingTemplate.convertAndSend("/topic/users/" + removedUserId + "/messages",
+                        (Object) Map.of("event", "GROUP_REMOVED", "conversationId", conversationId));
+                Map<String, Object> changed = Map.of("event", "GROUP_MEMBERS_CHANGED",
+                        "conversationId", conversationId);
+                for (Long id : remainingIds) {
+                    messagingTemplate.convertAndSend("/topic/users/" + id + "/messages", (Object) changed);
+                }
+            }
+        });
+    }
+
     public MessageResponse editMessage(EditMessageRequest request) {
         Message message = messageRepository.findById(request.getMessageId())
                 .orElseThrow(() -> new RuntimeException("Tin nhắn không tồn tại"));
+
+        if (message.getMessageType() != MessageType.TEXT) {
+            throw new IllegalArgumentException("Chỉ chỉnh sửa tin nhắn TEXT");
+        }
 
         if (!message.getSender().getId().equals(request.getSenderId())) {
             throw new RuntimeException("Bạn chỉ có thể chỉnh sửa tin nhắn của chính mình");
@@ -469,20 +538,17 @@ public class ChatService {
         boolean encryptedEdit = request.getCiphertext() != null && !request.getCiphertext().isBlank()
                 && request.getIv() != null && !request.getIv().isBlank();
 
-        if (encryptedEdit) {
-            message.setContent(null);
-            message.setCiphertext(request.getCiphertext());
-            message.setIv(request.getIv());
-            message.setEncryptionVersion(
-                    request.getEncryptionVersion() != null ? request.getEncryptionVersion() : "AES-256-GCM"
-            );
-        } else {
-            // Backward compatibility cho message legacy/plaintext.
-            message.setContent(request.getContent());
-            message.setCiphertext(null);
-            message.setIv(null);
-            message.setEncryptionVersion(null);
+        if (!encryptedEdit) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "Nội dung chỉnh sửa phải được mã hóa AES-GCM");
         }
+        validateEncryptedText(request.getCiphertext(), request.getIv(), request.getEncryptionVersion());
+        message.setContent(null);
+        message.setCiphertext(request.getCiphertext());
+        message.setIv(request.getIv());
+        message.setEncryptionVersion(
+                request.getEncryptionVersion() != null ? request.getEncryptionVersion() : "AES-256-GCM"
+        );
         message.setIsEdited(true);
         Message saved = messageRepository.save(message);
 
@@ -490,6 +556,22 @@ public class ChatService {
         messagingTemplate.convertAndSend("/topic/conversations/" + message.getConversation().getId() + "/update", response);
 
         return response;
+    }
+
+    private void validateEncryptedText(String ciphertext, String iv, String version) {
+        if (version != null && !"AES-256-GCM".equals(version)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "Phiên bản mã hóa không hợp lệ");
+        }
+        try {
+            if (Base64.getDecoder().decode(iv).length != 12
+                    || Base64.getDecoder().decode(ciphertext).length < 16) {
+                throw new IllegalArgumentException("Sai độ dài bản mã hoặc IV");
+            }
+        } catch (IllegalArgumentException error) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "Bản mã AES-GCM không hợp lệ", error);
+        }
     }
 
     public MessageResponse deleteMessage(Long messageId, Long senderId) {

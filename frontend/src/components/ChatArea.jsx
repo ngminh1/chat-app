@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { Fragment, useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import {
   Send,
@@ -31,6 +31,8 @@ import { formatMessageTime, formatSidebarTime, formatDateDivider, isSameDay } fr
 import { CHAT_THEMES } from '../utils/themeConfig';
 import { ChatTimelineSkeleton } from './Skeletons';
 import { API_BASE } from '../config/api';
+import ProtectedMediaImage from './ProtectedMediaImage';
+import { downloadMedia, publicMediaUrl } from '../utils/mediaAccess';
 
 const REACTION_LIST = ['👍', '❤️', '😂', '😮', '😢', '😡'];
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // Giới hạn 25MB
@@ -39,7 +41,6 @@ export default function ChatArea({
   activeConversation,
   messages,
   currentUserId,
-  currentUserName,
   onSendMessage,
   onEditMessage,
   onDeleteMessage,
@@ -73,10 +74,13 @@ export default function ChatArea({
 
   const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
   const [currentSearchIndex, setCurrentSearchIndex] = useState(0);
-  const [isSearchingLoading, setIsSearchingLoading] = useState(false);
   const [highlightedMsgId, setHighlightedMsgId] = useState(null);
+
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const searchResults = normalizedSearch ? messages.filter((msg) =>
+    !msg.isDeleted && typeof msg.content === 'string' &&
+    msg.content.toLowerCase().includes(normalizedSearch)) : [];
 
   const [showScrollBottom, setShowScrollBottom] = useState(false);
 
@@ -113,32 +117,7 @@ export default function ChatArea({
     removeSelectedFile();
   }, [activeConversation?.conversationId]);
 
-  useEffect(() => {
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      setIsSearchingLoading(false);
-      return;
-    }
-
-    // Message AES đã được App decrypt trước khi truyền vào ChatArea.
-    // Vì backend chỉ có ciphertext nên search TEXT mã hóa phải làm trên plaintext phía client.
-    const query = searchQuery.trim().toLowerCase();
-    const results = messages.filter((msg) =>
-      !msg.isDeleted &&
-      typeof msg.content === 'string' &&
-      msg.content.toLowerCase().includes(query)
-    );
-
-    setSearchResults(results);
-    setCurrentSearchIndex(0);
-    setIsSearchingLoading(false);
-
-    if (results.length > 0) {
-      setTimeout(() => jumpToMessageId(results[0].id), 0);
-    }
-  }, [searchQuery, activeConversation?.conversationId, messages]);
-
-  const jumpToMessageId = (msgId) => {
+  const jumpToMessageId = useCallback((msgId) => {
     setHighlightedMsgId(msgId);
     const element = document.getElementById(`msg-${msgId}`);
     if (element) {
@@ -147,7 +126,14 @@ export default function ChatArea({
     setTimeout(() => {
       setHighlightedMsgId(null);
     }, 2500);
-  };
+  }, []);
+
+  const firstSearchMessageId = searchResults[0]?.id;
+  useEffect(() => {
+    if (!normalizedSearch || !firstSearchMessageId) return;
+    const timer = setTimeout(() => jumpToMessageId(firstSearchMessageId), 0);
+    return () => clearTimeout(timer);
+  }, [normalizedSearch, firstSearchMessageId, activeConversation?.conversationId, jumpToMessageId]);
 
   const handleNextSearch = () => {
     if (searchResults.length === 0) return;
@@ -212,14 +198,14 @@ export default function ChatArea({
     }
   };
 
-  const removeSelectedFile = () => {
+  function removeSelectedFile() {
     setSelectedFile(null);
     setUploadPercent(0);
     if (filePreviewUrl) {
       URL.revokeObjectURL(filePreviewUrl);
       setFilePreviewUrl(null);
     }
-  };
+  }
 
   const formatFileSize = (bytes) => {
     if (!bytes) return '0 B';
@@ -244,7 +230,7 @@ export default function ChatArea({
         await onEditMessage(editingMessage.id, inputText.trim());
         setEditingMessage(null);
         setInputText('');
-      } catch (err) {
+      } catch {
         setSendErrorMessage("Không thể chỉnh sửa tin nhắn.");
       } finally {
         setIsSending(false);
@@ -260,6 +246,7 @@ export default function ChatArea({
         formData.append('file', selectedFile);
 
         const uploadRes = await axios.post(`${API_BASE}/media/upload`, formData, {
+          params: { purpose: 'attachment', conversationId: activeConversation.conversationId },
           headers: { 'Content-Type': 'multipart/form-data' },
           onUploadProgress: (progressEvent) => {
             if (progressEvent.total) {
@@ -335,7 +322,7 @@ export default function ChatArea({
     try {
       await onSendMessage('👍', null, 'TEXT', null, null, null);
       scrollToBottom('smooth');
-    } catch (err) {
+    } catch {
       setSendErrorMessage("Không thể gửi biểu tượng chào.");
     } finally {
       setIsSending(false);
@@ -412,7 +399,7 @@ export default function ChatArea({
 
           <div className="relative flex-shrink-0">
             {headerAvatar ? (
-              <img src={headerAvatar} alt="" className="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700" />
+              <img src={publicMediaUrl(headerAvatar)} alt="" className="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700" />
             ) : (
               <div className={`w-10 h-10 rounded-full text-white flex items-center justify-center font-bold text-sm shadow-xs ${
                 isGroup ? 'bg-gradient-to-tr from-purple-600 to-indigo-500' : 'bg-gradient-to-tr from-[#0062FF] to-sky-400'
@@ -448,7 +435,7 @@ export default function ChatArea({
             <FolderOpen className="w-5 h-5" />
           </button>
           <button
-            onClick={() => { setIsSearching(!isSearching); setSearchQuery(''); setSearchResults([]); }}
+            onClick={() => { setIsSearching(!isSearching); setSearchQuery(''); setCurrentSearchIndex(0); }}
             className={`p-2 rounded-xl transition-colors cursor-pointer ${
               isSearching ? 'bg-blue-50 text-[#0062FF] dark:bg-slate-800 dark:text-white' : 'hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
@@ -479,11 +466,10 @@ export default function ChatArea({
               type="text"
               placeholder="Tìm tin nhắn..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => { setSearchQuery(e.target.value); setCurrentSearchIndex(0); }}
               className="flex-1 text-xs bg-transparent focus:outline-none placeholder:text-slate-400"
               autoFocus
             />
-            {isSearchingLoading && <Loader2 className="w-3.5 h-3.5 animate-spin text-[#0062FF]" />}
           </div>
 
           {searchResults.length > 0 && (
@@ -498,7 +484,7 @@ export default function ChatArea({
             </div>
           )}
 
-          <button onClick={() => { setIsSearching(false); setSearchQuery(''); setSearchResults([]); }} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl cursor-pointer">
+          <button onClick={() => { setIsSearching(false); setSearchQuery(''); setCurrentSearchIndex(0); }} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -577,7 +563,7 @@ export default function ChatArea({
             const showDateDivider = !prevMsg || !isSameDay(prevMsg.createdAt, msg.createdAt);
 
             return (
-              <React.Fragment key={msg.id || `msg-temp-${index}`}>
+              <Fragment key={msg.id || `msg-temp-${index}`}>
                 {showDateDivider && (
                   <div className="flex justify-center my-4 select-none">
                     <span className={`px-3 py-1 rounded-full text-[11px] font-semibold tracking-wide border shadow-2xs ${
@@ -675,7 +661,7 @@ export default function ChatArea({
                         </div>
                       ) : isImage ? (
                         <div className="space-y-1.5">
-                          <img src={msg.mediaUrl} alt="" onClick={() => setPreviewModalImg(msg.mediaUrl)} className="rounded-2xl max-h-72 max-w-full object-cover cursor-pointer hover:opacity-95 shadow-xs border border-slate-200 dark:border-slate-800" />
+                          <ProtectedMediaImage src={msg.mediaUrl} alt="" onClick={() => setPreviewModalImg(msg.mediaUrl)} className="rounded-2xl max-h-72 max-w-full object-cover cursor-pointer hover:opacity-95 shadow-xs border border-slate-200 dark:border-slate-800" />
                           {msg.content && (
                             <div className={`px-4 py-2 rounded-xl text-sm leading-relaxed ${isMe ? currentTheme.bgBubble : isDarkMode ? 'bg-slate-800 text-slate-100' : 'bg-slate-100 text-slate-900'}`}>
                               {msg.content}
@@ -696,9 +682,9 @@ export default function ChatArea({
                             <p className="text-xs text-slate-400 mt-0.5">{formatFileSize(msg.fileSize)}</p>
                           </div>
                           {msg.mediaUrl && (
-                            <a href={`${API_BASE.replace(/\/api$/, '')}${msg.mediaUrl}`} download={msg.fileName} target="_blank" rel="noreferrer" className="p-2 bg-white dark:bg-slate-900 hover:bg-[#0062FF] hover:text-white text-[#0062FF] rounded-xl shadow-xs flex-shrink-0 transition-colors">
+                            <button type="button" onClick={() => downloadMedia(msg.mediaUrl, msg.fileName).catch(console.error)} className="p-2 bg-white dark:bg-slate-900 hover:bg-[#0062FF] hover:text-white text-[#0062FF] rounded-xl shadow-xs flex-shrink-0 transition-colors">
                               <Download className="w-4 h-4" />
-                            </a>
+                            </button>
                           )}
                         </div>
                       ) : isLike ? (
@@ -744,7 +730,7 @@ export default function ChatArea({
                     </div>
                   </div>
                 )}
-              </React.Fragment>
+              </Fragment>
             );
           })
         )}
@@ -923,7 +909,7 @@ export default function ChatArea({
           <button onClick={() => setPreviewModalImg(null)} className="absolute top-4 right-4 p-2 text-white/80 hover:text-white bg-white/10 rounded-xl cursor-pointer">
             <X className="w-6 h-6" />
           </button>
-          <img src={previewModalImg} alt="" className="max-h-[90vh] max-w-[90vw] object-contain rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()} />
+          <ProtectedMediaImage src={previewModalImg} alt="" className="max-h-[90vh] max-w-[90vw] object-contain rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()} />
         </div>
       )}
     </main>

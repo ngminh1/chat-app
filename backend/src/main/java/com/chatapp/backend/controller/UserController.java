@@ -4,6 +4,8 @@ import com.chatapp.backend.dto.UpdateProfileRequest;
 import com.chatapp.backend.dto.UserResponse;
 import com.chatapp.backend.entity.User;
 import com.chatapp.backend.repository.UserRepository;
+import com.chatapp.backend.security.RequestAccess;
+import com.chatapp.backend.security.MediaUrls;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -14,15 +16,16 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/users")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class UserController {
 
     private final UserRepository userRepository;
+    private final RequestAccess access;
 
     @PutMapping("/{id}")
     public ResponseEntity<?> updateUserProfile(
             @PathVariable Long id,
             @RequestBody UpdateProfileRequest request) {
+        access.requireSelf(id);
         User user = userRepository.findById(id).orElse(null);
         if (user == null) {
             return ResponseEntity.notFound().build();
@@ -32,6 +35,9 @@ public class UserController {
             user.setDisplayName(request.getDisplayName().trim());
         }
         if (request.getAvatarUrl() != null) {
+            if (!request.getAvatarUrl().equals(user.getAvatarUrl())) {
+                MediaUrls.requirePublicAvatarUrl(request.getAvatarUrl());
+            }
             user.setAvatarUrl(request.getAvatarUrl().trim());
         }
 
@@ -50,6 +56,7 @@ public class UserController {
     public ResponseEntity<List<UserResponse>> searchUsers(
             @RequestParam String query,
             @RequestParam Long currentUserId) {
+        access.requireSelf(currentUserId);
         List<User> users = userRepository.searchUsers(query, currentUserId);
         List<UserResponse> responses = users.stream()
                 .map(u -> UserResponse.builder()

@@ -1,5 +1,6 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { X, MessageSquare } from 'lucide-react';
+import { publicMediaUrl } from '../utils/mediaAccess';
 
 export default function ToastNotification({ toast, onClose, onSelectConversation }) {
   useEffect(() => {
@@ -25,7 +26,7 @@ export default function ToastNotification({ toast, onClose, onSelectConversation
         <div className="relative flex-shrink-0">
           {toast.avatarUrl ? (
             <img
-              src={toast.avatarUrl}
+              src={publicMediaUrl(toast.avatarUrl)}
               alt=""
               className="w-10 h-10 rounded-full object-cover border border-slate-200"
             />

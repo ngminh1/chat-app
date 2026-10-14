@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import { useState, useRef } from 'react';
 import axios from 'axios';
 import {
   Loader2,
@@ -107,6 +107,7 @@ export default function AuthScreen({ onLoginSuccess, isDarkMode, onToggleDarkMod
           const formData = new FormData();
           formData.append('file', selectedAvatarFile);
           const uploadRes = await axios.post(`${API_BASE}/media/upload`, formData, {
+            params: { purpose: 'avatar' },
             headers: { 'Content-Type': 'multipart/form-data' }
           });
           uploadedAvatarUrl = uploadRes.data.fileUrl;
@@ -188,7 +189,7 @@ export default function AuthScreen({ onLoginSuccess, isDarkMode, onToggleDarkMod
               <input
                 type="file"
                 ref={avatarInputRef}
-                accept="image/*"
+                accept="image/png,image/jpeg,image/gif,image/webp"
                 className="hidden"
                 onChange={handleAvatarChange}
               />
