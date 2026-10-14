@@ -26,19 +26,19 @@ public class FileStorageService {
     private static final long MAX_UPLOAD_BYTES = 25L * 1024 * 1024;
 
     private final Path fileStorageLocation;
-    private final R2MediaStorage r2Storage;
+    private final SupabaseMediaStorage supabaseStorage;
 
     @Autowired
-    public FileStorageService(ObjectProvider<R2MediaStorage> r2StorageProvider) {
-        this(Paths.get("uploads"), r2StorageProvider.getIfAvailable());
+    public FileStorageService(ObjectProvider<SupabaseMediaStorage> supabaseStorageProvider) {
+        this(Paths.get("uploads"), supabaseStorageProvider.getIfAvailable());
     }
 
     FileStorageService(Path storageDirectory) {
         this(storageDirectory, null);
     }
 
-    FileStorageService(Path storageDirectory, R2MediaStorage r2Storage) {
-        this.r2Storage = r2Storage;
+    FileStorageService(Path storageDirectory, SupabaseMediaStorage supabaseStorage) {
+        this.supabaseStorage = supabaseStorage;
         this.fileStorageLocation = storageDirectory.toAbsolutePath().normalize();
         try {
             Files.createDirectories(this.fileStorageLocation);
@@ -87,9 +87,9 @@ public class FileStorageService {
 
             String uniqueFileName = (avatar ? "avatar-" : "attachment-" + conversationId + "-")
                     + UUID.randomUUID() + fileExtension;
-            // With R2, the local copy is only a temporary buffer for SHA-256 validation.
-            // It is removed even when hashing or R2 upload fails.
-            Path targetLocation = r2Storage == null
+            // With Supabase Storage, the local copy is only a temporary buffer for SHA-256 validation.
+            // It is removed even when hashing or Supabase upload fails.
+            Path targetLocation = supabaseStorage == null
                     ? this.fileStorageLocation.resolve(uniqueFileName)
                     : Files.createTempFile("dispatch-upload-", ".tmp");
             try {
@@ -111,8 +111,8 @@ public class FileStorageService {
             }
 
             String contentType = file.getContentType();
-            if (r2Storage != null) {
-                r2Storage.upload(targetLocation, uniqueFileName, contentType);
+            if (supabaseStorage != null) {
+                supabaseStorage.upload(targetLocation, uniqueFileName, contentType);
             }
             MessageType messageType = MessageType.FILE;
             if (contentType != null && contentType.startsWith("image/")) {
@@ -129,7 +129,7 @@ public class FileStorageService {
                     .messageType(messageType)
                     .build();
             } finally {
-                if (r2Storage != null) {
+                if (supabaseStorage != null) {
                     Files.deleteIfExists(targetLocation);
                 }
             }
@@ -139,12 +139,12 @@ public class FileStorageService {
     }
 
     public Resource loadFileAsResource(String fileName) {
-        if (r2Storage != null) {
+        if (supabaseStorage != null) {
             try {
-                return r2Storage.loadFileAsResource(fileName);
+                return supabaseStorage.loadFileAsResource(fileName);
             } catch (org.springframework.web.server.ResponseStatusException e) {
                 // Allow previously stored local files to remain accessible during migration.
-                // If R2 is temporarily unavailable, do NOT treat it as a missing file.
+                // If Supabase Storage is temporarily unavailable, do NOT treat it as a missing file.
                 if (e.getStatusCode() != org.springframework.http.HttpStatus.NOT_FOUND) {
                     throw e;
                 }
