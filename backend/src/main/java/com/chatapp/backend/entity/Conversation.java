@@ -43,7 +43,13 @@ public class Conversation {
     @JsonIgnore
     @Column(name = "aes_key", length = 100)
     private String aesKey;
-
+    /**
+ * Khóa AES-256 đã được bọc bằng ElGamal hybrid.
+ * Không chứa khóa AES thô.
+ */
+@JsonIgnore
+@Column(name = "wrapped_aes_key", columnDefinition = "TEXT")
+private String wrappedAesKey;
     @CreationTimestamp
     private LocalDateTime createdAt;
 
