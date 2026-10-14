@@ -88,6 +88,19 @@ export default function App() {
 
   const stompClientRef = useRef(null);
 
+  // Log each unreadable ciphertext once per session, not after every refresh/reaction.
+  const reportedDecryptFailures = useRef(new Set());
+  const reportDecryptFailure = (category, id, err) => {
+    const key = `${category}:${id}`;
+    if (reportedDecryptFailures.current.has(key)) return;
+    reportedDecryptFailures.current.add(key);
+    if (err?.name === 'OperationError') {
+      console.warn(`Không thể xác thực AES-GCM cho ${category} ${id}; giữ nguyên ciphertext trên server.`);
+    } else {
+      console.error(`Lỗi giải mã ${category} ${id}:`, err);
+    }
+  };
+
   // Giải mã reply preview nếu reply là TEXT đã mã hóa.
   const decryptReplyPreview = async (reply, conversationId) => {
     if (!reply) return reply;
@@ -98,7 +111,7 @@ export default function App() {
         const plaintext = await decryptMessage(reply.ciphertext, reply.iv, key);
         return { ...reply, content: plaintext };
       } catch (err) {
-        console.error('Không thể giải mã reply preview:', err);
+        reportDecryptFailure('reply', reply.id ?? `${conversationId}:${reply.iv}`, err);
         return { ...reply, content: '[Không thể giải mã tin nhắn]' };
       }
     }
@@ -128,7 +141,7 @@ export default function App() {
         const key = await getConversationAESKey(result.conversationId, currentUser.id);
         result.content = await decryptMessage(result.ciphertext, result.iv, key);
       } catch (err) {
-        console.error(`Không thể giải mã message ${result.id}:`, err);
+        reportDecryptFailure('message', result.id, err);
         result.content = '[Không thể giải mã tin nhắn]';
       }
     }
@@ -148,7 +161,7 @@ export default function App() {
         : '';
       return { ...conv, lastMessage: prefix + plaintext };
     } catch (err) {
-      console.error(`Không thể giải mã preview conversation ${conv.conversationId}:`, err);
+      reportDecryptFailure('conversation preview', conv.conversationId, err);
       return { ...conv, lastMessage: '[Không thể giải mã tin nhắn]' };
     }
   };
