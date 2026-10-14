@@ -1,5 +1,7 @@
 package com.chatapp.backend.service;
-
+import com.chatapp.backend.security.elgamal.ElGamalKeyWrapService;
+import org.springframework.beans.factory.annotation.Autowired;
+import java.util.Arrays;
 import com.chatapp.backend.dto.*;
 import com.chatapp.backend.entity.*;
 import com.chatapp.backend.repository.*;
@@ -33,35 +35,143 @@ public class ChatService {
     private final MessageReactionRepository messageReactionRepository;
     private final UserRepository userRepository;
     private final SimpMessagingTemplate messagingTemplate;
+    private ElGamalKeyWrapService elGamalKeyWrapService;
 
+@Autowired(required = false)
+public void setElGamalKeyWrapService(
+        ElGamalKeyWrapService service) {
+    this.elGamalKeyWrapService = service;
+}
     /**
      * DEV ONLY: trả cùng một raw AES-256 key cho mọi thành viên của conversation.
      * Backend biết key nên đây chỉ là cơ chế demo AES, CHƯA PHẢI E2EE.
      */
-    public synchronized AesKeyResponse getOrCreateConversationAesKey(Long conversationId, Long userId) {
-        Conversation conversation = conversationRepository.findById(conversationId)
-                .orElseThrow(() -> new RuntimeException("Cuộc trò chuyện không tồn tại"));
+    
+public synchronized AesKeyResponse getOrCreateConversationAesKey(
+        Long conversationId, Long userId) {
 
-        conversationMemberRepository.findByConversationIdAndUserId(conversationId, userId)
-                .orElseThrow(() -> new RuntimeException("Bạn không phải thành viên của cuộc trò chuyện này"));
+    Conversation conversation = conversationRepository.findById(conversationId)
+            .orElseThrow(() ->
+                    new IllegalStateException("Cuộc trò chuyện không tồn tại"));
 
-        if (conversation.getAesKey() == null || conversation.getAesKey().isBlank()) {
-            // Không thay khóa của hội thoại đã có ciphertext; khóa cũ có thể chỉ còn trong bản sao lưu.
-            boolean hasEncryptedHistory = messageRepository.existsByConversationIdAndCiphertextIsNotNull(conversationId);
-            if (hasEncryptedHistory) {
-                throw new IllegalStateException("Hội thoại có tin mã hóa nhưng thiếu khóa AES gốc");
-            }
-            byte[] rawKey = new byte[32]; // 256 bit
-            new SecureRandom().nextBytes(rawKey);
-            conversation.setAesKey(Base64.getEncoder().encodeToString(rawKey));
-            conversationRepository.save(conversation);
+    conversationMemberRepository
+            .findByConversationIdAndUserId(conversationId, userId)
+            .orElseThrow(() ->
+                    new IllegalStateException("Không có quyền truy cập hội thoại"));
+
+    String rawKey = conversation.getAesKey();
+    String wrappedKey = conversation.getWrappedAesKey();
+
+    boolean hasRaw = rawKey != null && !rawKey.isBlank();
+    boolean hasWrapped = wrappedKey != null && !wrappedKey.isBlank();
+    boolean elGamalEnabled = elGamalKeyWrapService != null;
+
+    String aesKey;
+    boolean changed = false;
+
+    // 1. Ưu tiên mở khóa ElGamal nếu đã có bản bọc
+    if (hasWrapped && elGamalEnabled) {
+        aesKey = elGamalKeyWrapService.unwrap(
+                wrappedKey, conversationId);
+
+        validateAesKey(aesKey);
+
+        // Trong giai đoạn migration, đối chiếu với khóa thô.
+        if (hasRaw && !aesKeysEqual(rawKey, aesKey)) {
+            throw new IllegalStateException(
+                    "Khóa AES gốc không khớp khóa ElGamal");
         }
 
-        return AesKeyResponse.builder()
-                .conversationId(conversationId)
-                .key(conversation.getAesKey())
-                .build();
+    // 2. Hỗ trợ khóa AES cũ
+    } else if (hasRaw) {
+        validateAesKey(rawKey);
+        aesKey = rawKey;
+
+    // 3. Có bản bọc nhưng ElGamal chưa được bật
+    } else if (hasWrapped) {
+        throw new IllegalStateException(
+                "Cần bật ElGamal để mở khóa hội thoại");
+
+    // 4. Hội thoại chưa từng có khóa AES
+    } else {
+        boolean hasHistory = messageRepository
+                .existsByConversationIdAndCiphertextIsNotNull(conversationId);
+
+        if (hasHistory) {
+            throw new IllegalStateException(
+                    "Hội thoại có tin mã hóa nhưng mất khóa AES");
+        }
+
+        byte[] generated = new byte[32];
+        try {
+            new SecureRandom().nextBytes(generated);
+            aesKey = Base64.getEncoder().encodeToString(generated);
+        } finally {
+            Arrays.fill(generated, (byte) 0);
+        }
+
+        conversation.setAesKey(aesKey);
+        changed = true;
     }
+
+    // 5. Bọc khóa hiện có, không tạo khóa AES mới
+    if (elGamalEnabled && !hasWrapped) {
+        String newWrapped = elGamalKeyWrapService.wrap(
+                aesKey, conversationId);
+
+        String verified = elGamalKeyWrapService.unwrap(
+                newWrapped, conversationId);
+
+        if (!aesKeysEqual(aesKey, verified)) {
+            throw new IllegalStateException(
+                    "Kiểm chứng ElGamal thất bại");
+        }
+
+        conversation.setWrappedAesKey(newWrapped);
+        changed = true;
+    }
+
+    // 6. Lưu khóa AES và dữ liệu bọc trong cùng transaction
+    if (changed) {
+        conversationRepository.save(conversation);
+    }
+
+    return AesKeyResponse.builder()
+            .conversationId(conversationId)
+            .key(aesKey)
+            .build();
+}
+
+private static void validateAesKey(String encoded) {
+    byte[] decoded;
+    try {
+        decoded = Base64.getDecoder().decode(encoded);
+    } catch (IllegalArgumentException e) {
+        throw new IllegalStateException("Khóa AES không hợp lệ", e);
+    }
+
+    try {
+        if (decoded.length != 32) {
+            throw new IllegalStateException("Khóa AES không đủ 256 bit");
+        }
+    } finally {
+        Arrays.fill(decoded, (byte) 0);
+    }
+}
+
+private static boolean aesKeysEqual(String first, String second) {
+    validateAesKey(first);
+    validateAesKey(second);
+
+    byte[] a = Base64.getDecoder().decode(first);
+    byte[] b = Base64.getDecoder().decode(second);
+    try {
+        return java.security.MessageDigest.isEqual(a, b);
+    } finally {
+        Arrays.fill(a, (byte) 0);
+        Arrays.fill(b, (byte) 0);
+    }
+}
 
     public void updateUserPresence(Long userId, boolean isOnline) {
         userRepository.findById(userId).ifPresent(user -> {
