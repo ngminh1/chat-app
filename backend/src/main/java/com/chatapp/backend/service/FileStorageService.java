@@ -26,7 +26,11 @@ public class FileStorageService {
     private final Path fileStorageLocation;
 
     public FileStorageService() {
-        this.fileStorageLocation = Paths.get("uploads").toAbsolutePath().normalize();
+        this(Paths.get("uploads"));
+    }
+
+    FileStorageService(Path storageDirectory) {
+        this.fileStorageLocation = storageDirectory.toAbsolutePath().normalize();
         try {
             Files.createDirectories(this.fileStorageLocation);
         } catch (Exception ex) {
