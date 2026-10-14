@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import { useAuthSession } from '../context/sessionContext';
 import {
   X,
   Image as ImageIcon,
@@ -22,6 +22,8 @@ export default function MediaGalleryModal({
   conversationTitle,
   isDarkMode
 }) {
+  const session = useAuthSession();
+  const api = session.api;
   const [activeTab, setActiveTab] = useState('images');
   const [mediaList, setMediaList] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -30,12 +32,12 @@ export default function MediaGalleryModal({
   useEffect(() => {
     if (isOpen && conversationId) {
       setLoading(true);
-      axios.get(`${API_BASE}/chat/conversations/${conversationId}/media`)
-        .then((res) => setMediaList(res.data))
-        .catch((err) => console.error('Lỗi lấy media:', err.response?.status || 'media_list_failed'))
-        .finally(() => setLoading(false));
+      api.get(`${API_BASE}/chat/conversations/${conversationId}/media`)
+        .then(session.guard((res) => setMediaList(res.data)))
+        .catch(session.guard((err) => console.error('Lỗi lấy media:', err.response?.status || 'media_list_failed')))
+        .finally(session.guard(() => setLoading(false)));
     }
-  }, [isOpen, conversationId]);
+  }, [isOpen, conversationId, api, session]);
 
   if (!isOpen) return null;
 

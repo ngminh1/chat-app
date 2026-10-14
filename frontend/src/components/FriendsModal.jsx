@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import { useAuthSession } from '../context/sessionContext';
 import {
   X,
   Users,
@@ -21,6 +21,8 @@ export default function FriendsModal({
   onStartChatWithUser,
   isDarkMode
 }) {
+  const session = useAuthSession();
+  const api = session.api;
   const [activeTab, setActiveTab] = useState('friends');
   const [friendsList, setFriendsList] = useState([]);
   const [pendingList, setPendingList] = useState([]);
@@ -28,19 +30,20 @@ export default function FriendsModal({
   const [actionLoadingId, setActionLoadingId] = useState(null);
 
   const fetchFriendsAndRequests = async () => {
-    if (!currentUserId) return;
+    if (!currentUserId || !session.isActive()) return;
     setLoading(true);
     try {
       const [friendsRes, pendingRes] = await Promise.all([
-        axios.get(`${API_BASE}/friends/${currentUserId}`),
-        axios.get(`${API_BASE}/friends/pending/${currentUserId}`)
+        api.get(`${API_BASE}/friends/${currentUserId}`),
+        api.get(`${API_BASE}/friends/pending/${currentUserId}`)
       ]);
+      if (!session.isActive()) return;
       setFriendsList(friendsRes.data || []);
       setPendingList(pendingRes.data || []);
     } catch (err) {
-      console.error("Lỗi lấy danh sách bạn bè / lời mời:", err);
+      if (session.isActive()) console.error('Lỗi lấy danh sách bạn bè / lời mời:', err.response?.status || 'friends_failed');
     } finally {
-      setLoading(false);
+      if (session.isActive()) setLoading(false);
     }
   };
 
@@ -55,24 +58,26 @@ export default function FriendsModal({
   const handleAcceptRequest = async (friendshipId) => {
     setActionLoadingId(friendshipId);
     try {
-      await axios.put(`${API_BASE}/friends/${friendshipId}/accept`);
+      await api.put(`${API_BASE}/friends/${friendshipId}/accept`);
+      if (!session.isActive()) return;
       await fetchFriendsAndRequests();
     } catch {
-      alert("Lỗi khi chấp nhận lời mời");
+      if (session.isActive()) alert("Lỗi khi chấp nhận lời mời");
     } finally {
-      setActionLoadingId(null);
+      if (session.isActive()) setActionLoadingId(null);
     }
   };
 
   const handleDeclineRequest = async (friendshipId) => {
     setActionLoadingId(friendshipId);
     try {
-      await axios.put(`${API_BASE}/friends/${friendshipId}/decline`);
+      await api.put(`${API_BASE}/friends/${friendshipId}/decline`);
+      if (!session.isActive()) return;
       await fetchFriendsAndRequests();
     } catch {
-      alert("Lỗi khi từ chối lời mời");
+      if (session.isActive()) alert("Lỗi khi từ chối lời mời");
     } finally {
-      setActionLoadingId(null);
+      if (session.isActive()) setActionLoadingId(null);
     }
   };
 
@@ -80,12 +85,13 @@ export default function FriendsModal({
     if (!window.confirm(`Bạn có chắc chắn muốn hủy kết bạn với "${targetName}"?`)) return;
     setActionLoadingId(friendshipId);
     try {
-      await axios.delete(`${API_BASE}/friends/${friendshipId}`);
+      await api.delete(`${API_BASE}/friends/${friendshipId}`);
+      if (!session.isActive()) return;
       await fetchFriendsAndRequests();
     } catch {
-      alert("Lỗi khi hủy kết bạn");
+      if (session.isActive()) alert("Lỗi khi hủy kết bạn");
     } finally {
-      setActionLoadingId(null);
+      if (session.isActive()) setActionLoadingId(null);
     }
   };
 

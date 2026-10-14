@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
+import { useAuthSession } from '../context/sessionContext';
 import { X, User, Camera, Save, Loader2, Volume2, Bell, MessageSquare } from 'lucide-react';
 import { requestNotificationPermission } from '../utils/browserNotifications';
 import { API_BASE } from '../config/api';
@@ -13,6 +13,8 @@ export default function ProfileModal({
   settings,
   onUpdateSettings
 }) {
+  const session = useAuthSession();
+  const api = session.api;
   const [displayName, setDisplayName] = useState('');
   const [currentAvatarUrl, setCurrentAvatarUrl] = useState('');
   
@@ -24,6 +26,8 @@ export default function ProfileModal({
   const [message, setMessage] = useState({ type: '', text: '' });
 
   const fileInputRef = useRef(null);
+  const closeTimerRef = useRef(null);
+  useEffect(() => () => clearTimeout(closeTimerRef.current), []);
 
   useEffect(() => {
     if (currentUser && isOpen) {
@@ -47,6 +51,7 @@ export default function ProfileModal({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!session.isActive()) return;
     if (!displayName.trim()) {
       setMessage({ type: 'error', text: 'Tên hiển thị không được để trống' });
       return;
@@ -63,37 +68,43 @@ export default function ProfileModal({
         const formData = new FormData();
         formData.append('file', selectedAvatarFile);
 
-        const uploadRes = await axios.post(`${API_BASE}/media/upload`, formData, {
+        const uploadRes = await api.post(`${API_BASE}/media/upload`, formData, {
           params: { purpose: 'avatar' },
           headers: { 'Content-Type': 'multipart/form-data' }
         });
+        if (!session.isActive()) return;
         finalAvatarUrl = uploadRes.data.fileUrl;
       }
 
-      const res = await axios.put(`${API_BASE}/users/${currentUser.id}`, {
+      const res = await api.put(`${API_BASE}/users/${currentUser.id}`, {
         displayName: displayName.trim(),
         avatarUrl: finalAvatarUrl
       });
 
+      if (!session.isActive()) return;
       onProfileUpdated(res.data);
       setMessage({ type: 'success', text: 'Cập nhật thông tin thành công!' });
-      setTimeout(() => {
-        onClose();
+      closeTimerRef.current = setTimeout(() => {
+        if (session.isActive()) onClose();
       }, 1000);
     } catch (err) {
+      if (!session.isActive()) return;
       setMessage({
         type: 'error',
         text: err.response?.data?.message || 'Có lỗi xảy ra khi cập nhật thông tin'
       });
     } finally {
-      setIsLoading(false);
-      setIsUploading(false);
+      if (session.isActive()) {
+        setIsLoading(false);
+        setIsUploading(false);
+      }
     }
   };
 
   const handleToggleDesktopNotif = async () => {
     if (!settings.desktopNotifications) {
       const perm = await requestNotificationPermission();
+      if (!session.isActive()) return;
       if (perm === 'granted') {
         onUpdateSettings({ ...settings, desktopNotifications: true });
       } else {

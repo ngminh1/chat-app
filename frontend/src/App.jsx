@@ -23,17 +23,76 @@ import { showDesktopNotification } from './utils/browserNotifications';
 import { encryptMessage } from './utils/crypto';
 import { getConversationAESKey, clearAESKeyCache } from './utils/aesKeyManager';
 import { createMessageDecryptor, getReadableMessageText } from './utils/messageDecryption';
+import { createAuthSession } from './utils/authSession.js';
+import { SessionProvider } from './context/SessionContext.jsx';
 
 export default function App() {
-  const [authToken, setAuthToken] = useState(() => localStorage.getItem('auth_token'));
-  const [currentUser, setCurrentUser] = useState(() => {
+  const [authState, setAuthState] = useState(() => {
+    const token = localStorage.getItem('auth_token');
     const saved = localStorage.getItem('auth_user');
-    return saved ? JSON.parse(saved) : null;
+    return { generation: 0, session: token && saved ? createAuthSession(JSON.parse(saved), token) : null };
   });
+  const authStateRef = useRef(authState);
+  const { session } = authState;
+  const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem('dark_mode') === 'true');
 
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    return localStorage.getItem('dark_mode') === 'true';
-  });
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', isDarkMode);
+  }, [isDarkMode]);
+
+  const handleToggleDarkMode = () => {
+    const next = !isDarkMode;
+    localStorage.setItem('dark_mode', next);
+    setIsDarkMode(next);
+  };
+
+  const handleLoginSuccess = (authData) => {
+    // Also reject a retained callback from an older login screen (including A -> A).
+    if (authStateRef.current !== authState) return;
+    session?.invalidate();
+    clearAESKeyCache();
+    const next = { generation: authState.generation + 1, session: createAuthSession(authData, authData.token) };
+    authStateRef.current = next;
+    localStorage.setItem('auth_token', authData.token);
+    localStorage.setItem('auth_user', JSON.stringify(authData));
+    setAuthState(next);
+  };
+
+  const handleLogout = () => {
+    if (authStateRef.current !== authState || !session) return;
+    // Invalidate before React commits the unmount; abort alone cannot stop every adapter/callback.
+    session.invalidate();
+    const next = { generation: authState.generation + 1, session: null };
+    authStateRef.current = next;
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('auth_user');
+    localStorage.removeItem('active_conv_id');
+    clearAESKeyCache();
+    setAuthState(next);
+    // Best-effort offline notification belongs to A even if B logs in immediately.
+    axios.put(`${API_BASE}/chat/presence`, null, {
+      params: { userId: session.user.id, isOnline: false },
+      headers: { Authorization: `Bearer ${session.token}` }
+    }).catch(() => {});
+  };
+
+  if (!session) {
+    return <AuthScreen key={authState.generation} onLoginSuccess={handleLoginSuccess}
+      isDarkMode={isDarkMode} onToggleDarkMode={handleToggleDarkMode} />;
+  }
+  return (
+    <SessionProvider session={session}>
+      <ChatSession key={session.id} session={session} onLogout={handleLogout}
+        isDarkMode={isDarkMode} onToggleDarkMode={handleToggleDarkMode} />
+    </SessionProvider>
+  );
+}
+
+// Every login owns new component state, refs, modal children and callback closures.
+function ChatSession({ session, onLogout, isDarkMode, onToggleDarkMode }) {
+  const [currentUser, setCurrentUser] = useState(session.user);
+  const api = session.api;
+  const handleToggleDarkMode = session.guard(onToggleDarkMode);
 
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [wsConnectionVersion, setWsConnectionVersion] = useState(0);
@@ -92,72 +151,57 @@ export default function App() {
 
   const stompClientRef = useRef(null);
 
-  const [messageDecryptor] = useState(() => createMessageDecryptor({ getKey: getConversationAESKey }));
-  const decryptMessagePayload = (message) => messageDecryptor.decryptMessagePayload(message, currentUser?.id);
+  const getSessionKey = async (...args) => {
+    session.assertActive();
+    const key = await getConversationAESKey(...args);
+    session.assertActive();
+    return key;
+  };
+  const [messageDecryptor] = useState(() => createMessageDecryptor({
+    getKey: getSessionKey,
+    logger: {
+      warn: session.guard((...args) => console.warn(...args)),
+      error: session.guard((...args) => console.error(...args))
+    }
+  }));
+  const decryptMessagePayload = async (message) => {
+    session.assertActive();
+    const decrypted = await messageDecryptor.decryptMessagePayload(message, currentUser.id);
+    session.assertActive();
+    return decrypted;
+  };
   const decryptConversationPreview = (conversation, userId) => messageDecryptor.decryptConversationPreview(conversation, userId);
 
-  const handleToggleDarkMode = () => {
-    const newMode = !isDarkMode;
-    setIsDarkMode(newMode);
-    localStorage.setItem('dark_mode', newMode);
-    if (newMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  };
-
-  useEffect(() => {
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [isDarkMode]);
-
   const handleUpdateSettings = (newSettings) => {
+    if (!session.isActive()) return;
     setSettings(newSettings);
     localStorage.setItem('chat_settings', JSON.stringify(newSettings));
   };
 
-  const handleLoginSuccess = (authData) => {
-    clearAESKeyCache();
-    messageDecryptor.clearFailures();
-    localStorage.setItem('auth_token', authData.token);
-    localStorage.setItem('auth_user', JSON.stringify(authData));
-    setAuthToken(authData.token);
-    setCurrentUser(authData);
-  };
-
   const handleLogout = () => {
-    const token = localStorage.getItem('auth_token');
-    if (currentUser && token) {
-      axios.put(`${API_BASE}/chat/presence`, null, {
-        params: { userId: currentUser.id, isOnline: false },
-        headers: { Authorization: `Bearer ${token}` }
-      }).catch(() => {});
-    }
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('auth_user');
-    localStorage.removeItem('active_conv_id');
-    clearAESKeyCache();
+    if (!session.isActive()) return;
+    session.invalidate();
     messageDecryptor.clearFailures();
-    setAuthToken(null);
-    setCurrentUser(null);
+    setConversations([]);
+    conversationsRef.current = [];
+    activeConvRef.current = null;
     setActiveConv(null);
     setMessages([]);
+    onLogout();
   };
 
   const fetchConversations = async (userId) => {
+    if (!session.isActive()) return;
     setIsLoadingConversations(true);
     try {
-      const res = await axios.get(`${API_BASE}/chat/conversations/my-chats/${userId}`);
+      const res = await api.get(`${API_BASE}/chat/conversations/my-chats/${userId}`);
+      if (!session.isActive()) return;
 
       // Backend không decrypt. Frontend decrypt preview của TEXT AES sau khi nhận response.
       const convList = await Promise.all(
         res.data.map((conv) => decryptConversationPreview(conv, userId))
       );
-
+      if (!session.isActive()) return;
       setConversations(convList);
 
       const savedActiveId = localStorage.getItem('active_conv_id');
@@ -166,9 +210,10 @@ export default function App() {
         if (matched) setActiveConv(matched);
       }
     } catch (err) {
+      if (!session.isActive()) return;
       console.error('Lỗi lấy danh sách chat.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
     } finally {
-      setIsLoadingConversations(false);
+      if (session.isActive()) setIsLoadingConversations(false);
     }
   };
 
@@ -179,22 +224,26 @@ export default function App() {
   }, [currentUser?.id]);
 
   const handleSelectConversation = async (conv) => {
+    if (!session.isActive()) return;
     setActiveConv(conv);
     localStorage.setItem('active_conv_id', conv.conversationId);
     setTypingUser(null);
     try {
-      await axios.put(`${API_BASE}/chat/conversations/${conv.conversationId}/read`, null, {
+      await api.put(`${API_BASE}/chat/conversations/${conv.conversationId}/read`, null, {
         params: { userId: currentUser.id }
       });
+      if (!session.isActive()) return;
       setConversations((prev) =>
         prev.map((c) => (c.conversationId === conv.conversationId ? { ...c, unreadCount: 0 } : c))
       );
     } catch (err) {
+      if (!session.isActive()) return;
       console.error('Lỗi đánh dấu đã đọc.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
     }
   };
 
   const handleBackToSidebar = () => {
+    if (!session.isActive()) return;
     setActiveConv(null);
     localStorage.removeItem('active_conv_id');
   };
@@ -203,48 +252,56 @@ export default function App() {
     if (!activeConv || !currentUser?.id) return;
 
     let cancelled = false;
+    const controller = new AbortController();
 
     const loadMessages = async () => {
       setIsLoadingMessages(true);
       try {
-        const res = await axios.get(`${API_BASE}/chat/conversations/${activeConv.conversationId}/messages`);
+        const res = await api.get(`${API_BASE}/chat/conversations/${activeConv.conversationId}/messages`, { signal: controller.signal });
+        if (cancelled || !session.isActive()) return;
         const decryptedMessages = await Promise.all(
           res.data.map((msg) => decryptMessagePayload(msg))
         );
-        if (!cancelled) setMessages(decryptedMessages);
+        if (!cancelled && session.isActive()) setMessages(decryptedMessages);
       } catch (err) {
+        if (cancelled || !session.isActive()) return;
         console.error('Lỗi tải lịch sử chat.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
       } finally {
-        if (!cancelled) setIsLoadingMessages(false);
+        if (!cancelled && session.isActive()) setIsLoadingMessages(false);
       }
     };
 
     loadMessages();
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [activeConv?.conversationId, currentUser?.id]);
+  }, [activeConv?.conversationId, currentUser?.id, api, session]);
 
   // WebSocket Connection: Tách hoàn toàn settings khỏi deps
   useEffect(() => {
     if (!currentUser?.id) return;
 
+    let disposed = false;
+    const isCurrent = () => !disposed && session.isActive();
     const client = new Client({
       webSocketFactory: () => new SockJS(WS_URL),
       connectHeaders: {
-        Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}`
+        Authorization: `Bearer ${session.token}`
       },
       debug: () => {},
       reconnectDelay: 5000,
       onConnect: () => {
+        if (!isCurrent()) { client.deactivate(); return; }
         setIsReconnecting(false);
         setWsConnectionVersion((version) => version + 1);
 
-        axios.put(`${API_BASE}/chat/presence`, null, {
+        api.put(`${API_BASE}/chat/presence`, null, {
           params: { userId: currentUser.id, isOnline: true }
         }).catch(() => {});
 
         client.subscribe('/topic/presence', (msgFrame) => {
+          if (!isCurrent()) return;
           const presence = JSON.parse(msgFrame.body);
           setPresenceMap((prev) => ({ ...prev, [presence.userId]: presence.isOnline }));
           if (presence.lastSeenAt) {
@@ -253,6 +310,8 @@ export default function App() {
         });
 
         client.subscribe(`/topic/users/${currentUser.id}/messages`, async (msgFrame) => {
+          if (!isCurrent()) return;
+          try {
           const encryptedMsg = JSON.parse(msgFrame.body);
           if (encryptedMsg.event === 'GROUP_REMOVED') {
             const id = Number(encryptedMsg.conversationId);
@@ -272,6 +331,7 @@ export default function App() {
             return;
           }
           const newMsg = await decryptMessagePayload(encryptedMsg);
+          if (!isCurrent()) return;
           const currentActive = activeConvRef.current;
           const isCurrentlyActiveRoom = currentActive && currentActive.conversationId === newMsg.conversationId;
           const isSentByMe = newMsg.senderId === currentUser.id;
@@ -286,6 +346,7 @@ export default function App() {
               if (newMsg.messageType === 'FILE') bodyPreview = `Đã gửi tệp: ${newMsg.fileName || ''}`;
 
               showDesktopNotification(newMsg.senderName || 'Tin nhắn mới', bodyPreview, null, () => {
+                if (!isCurrent()) return;
                 const targetConv = conversationsRef.current.find((c) => c.conversationId === newMsg.conversationId);
                 if (targetConv) handleSelectConversation(targetConv);
               });
@@ -323,9 +384,10 @@ export default function App() {
               return [...filtered, newMsg];
             });
             if (!isSentByMe) {
-              await axios.put(`${API_BASE}/chat/conversations/${newMsg.conversationId}/read`, null, {
+              await api.put(`${API_BASE}/chat/conversations/${newMsg.conversationId}/read`, null, {
                 params: { userId: currentUser.id }
               });
+              if (!isCurrent()) return;
             }
           }
 
@@ -353,21 +415,25 @@ export default function App() {
             const rest = prev.filter((c) => c.conversationId !== newMsg.conversationId);
             return [targetConv, ...rest];
           });
+          } catch (err) {
+            if (isCurrent()) console.error('Lỗi nhận tin nhắn.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
+          }
         });
       },
-      onWebSocketClose: () => setIsReconnecting(true),
-      onWebSocketError: () => setIsReconnecting(true),
-      onStompError: () => setIsReconnecting(true)
+      onWebSocketClose: () => { if (isCurrent()) setIsReconnecting(true); },
+      onWebSocketError: () => { if (isCurrent()) setIsReconnecting(true); },
+      onStompError: () => { if (isCurrent()) setIsReconnecting(true); }
     });
 
     client.activate();
     stompClientRef.current = client;
 
     return () => {
+      disposed = true;
       client.deactivate();
       if (stompClientRef.current === client) stompClientRef.current = null;
     };
-  }, [currentUser?.id]);
+  }, [currentUser?.id, api, session]);
 
   // Subscribe kênh của active conversation: Thay polling 200ms bằng listener trực tiếp
   useEffect(() => {
@@ -377,16 +443,25 @@ export default function App() {
     let updateSub = null;
     let typingSub = null;
     let themeSub = null;
+    let disposed = false;
+    const isCurrent = () => !disposed && session.isActive();
 
     const client = stompClientRef.current;
     if (client.connected) {
       updateSub = client.subscribe(`/topic/conversations/${convId}/update`, async (msgFrame) => {
+        if (!isCurrent()) return;
+        try {
         const encryptedUpdatedMsg = JSON.parse(msgFrame.body);
         const updatedMsg = await decryptMessagePayload(encryptedUpdatedMsg);
+        if (!isCurrent()) return;
         setMessages((prev) => prev.map((m) => (m.id === updatedMsg.id ? updatedMsg : m)));
+        } catch (err) {
+          if (isCurrent()) console.error('Lỗi cập nhật tin nhắn.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
+        }
       });
 
       typingSub = client.subscribe(`/topic/conversations/${convId}/typing`, (msgFrame) => {
+        if (!isCurrent()) return;
         const typingData = JSON.parse(msgFrame.body);
         const isSelf = Number(typingData.userId) === Number(currentUser?.id);
         const isTypingActive = typingData.isTyping ?? typingData.typing ?? false;
@@ -397,6 +472,7 @@ export default function App() {
       });
 
       themeSub = client.subscribe(`/topic/conversations/${convId}/theme`, (msgFrame) => {
+        if (!isCurrent()) return;
         const newTheme = msgFrame.body;
         setActiveConv((prev) => ({ ...prev, theme: newTheme }));
         setConversations((prev) =>
@@ -406,11 +482,12 @@ export default function App() {
     }
 
     return () => {
+      disposed = true;
       if (updateSub) updateSub.unsubscribe();
       if (typingSub) typingSub.unsubscribe();
       if (themeSub) themeSub.unsubscribe();
     };
-  }, [activeConv?.conversationId, currentUser?.id, wsConnectionVersion]);
+  }, [activeConv?.conversationId, currentUser?.id, wsConnectionVersion, session]);
 
   // Gửi tin nhắn: TEXT được AES-256-GCM encrypt ở frontend trước khi gọi backend.
   const handleSendMessage = async (
@@ -421,7 +498,7 @@ export default function App() {
     fileName = null,
     fileSize = null
   ) => {
-    if (!activeConv || !currentUser?.id) return;
+    if (!session.isActive() || !activeConv || !currentUser?.id) return;
 
     const tempId = `optimistic-${Date.now()}`;
     const nowIso = new Date().toISOString();
@@ -468,15 +545,16 @@ export default function App() {
 
       // Phase hiện tại chỉ mã hóa TEXT. IMAGE/FILE giữ nguyên behavior cũ.
       if (messageType === 'TEXT') {
-        const key = await getConversationAESKey(activeConv.conversationId, currentUser.id);
+        const key = await getSessionKey(activeConv.conversationId, currentUser.id);
         const encrypted = await encryptMessage(content || '', key);
+        session.assertActive();
         requestContent = null; // Không gửi plaintext TEXT lên backend.
         ciphertext = encrypted.ciphertext;
         iv = encrypted.iv;
         encryptionVersion = encrypted.encryptionVersion;
       }
 
-      const res = await axios.post(`${API_BASE}/chat/messages`, {
+      const res = await api.post(`${API_BASE}/chat/messages`, {
         conversationId: activeConv.conversationId,
         senderId: currentUser.id,
         content: requestContent,
@@ -489,6 +567,7 @@ export default function App() {
         fileName,
         fileSize
       });
+      if (!session.isActive()) return;
 
       if (settingsRef.current.soundEnabled) soundManager.playOutgoingMessageSound();
 
@@ -502,6 +581,7 @@ export default function App() {
         return prev.map((m) => (m.id === tempId ? serverMsg : m));
       });
     } catch (err) {
+      if (!session.isActive()) return;
       console.error('Lỗi gửi tin nhắn.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
       throw err;
@@ -509,6 +589,7 @@ export default function App() {
   };
 
   const handleConfirmForward = async (messageId, targetConvIds) => {
+    if (!session.isActive()) return;
     try {
       const sourceMessage =
         (forwardingMessage?.id === messageId ? forwardingMessage : null) ||
@@ -527,10 +608,11 @@ export default function App() {
         }
 
         for (const targetConversationId of targetConvIds) {
-          const key = await getConversationAESKey(targetConversationId, currentUser.id);
+          const key = await getSessionKey(targetConversationId, currentUser.id);
           const encrypted = await encryptMessage(plaintext, key);
+          session.assertActive();
 
-          await axios.post(`${API_BASE}/chat/messages`, {
+          await api.post(`${API_BASE}/chat/messages`, {
             conversationId: targetConversationId,
             senderId: currentUser.id,
             content: null,
@@ -546,13 +628,14 @@ export default function App() {
         }
       } else {
         // IMAGE/FILE vẫn dùng endpoint forward cũ trong phase AES-TEXT.
-        await axios.post(`${API_BASE}/chat/messages/forward`, {
+        await api.post(`${API_BASE}/chat/messages/forward`, {
           messageId,
           senderId: currentUser.id,
           targetConversationIds: targetConvIds
         });
       }
 
+      if (!session.isActive()) return;
       if (settingsRef.current.soundEnabled) soundManager.playOutgoingMessageSound();
       fetchConversations(currentUser.id);
       setActiveToast({
@@ -561,6 +644,7 @@ export default function App() {
         conversation: null
       });
     } catch (err) {
+      if (!session.isActive()) return;
       console.error('Lỗi chuyển tiếp tin nhắn.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
       setActiveToast({
         title: 'Lỗi',
@@ -572,14 +656,16 @@ export default function App() {
   };
 
   const handleEditMessage = async (messageId, newContent) => {
+    if (!session.isActive()) return;
     try {
       if (!activeConv || !currentUser?.id) return;
       getReadableMessageText(messages.find((message) => message.id === messageId));
 
-      const key = await getConversationAESKey(activeConv.conversationId, currentUser.id);
+      const key = await getSessionKey(activeConv.conversationId, currentUser.id);
       const encrypted = await encryptMessage(newContent, key); // encrypt lại => IV mới
+      session.assertActive();
 
-      const res = await axios.put(`${API_BASE}/chat/messages/edit`, {
+      const res = await api.put(`${API_BASE}/chat/messages/edit`, {
         messageId,
         senderId: currentUser.id,
         content: null,
@@ -591,36 +677,41 @@ export default function App() {
       const updated = await decryptMessagePayload(res.data);
       setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
     } catch (err) {
+      if (!session.isActive()) return;
       console.error('Lỗi sửa tin nhắn.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
       throw err;
     }
   };
 
   const handleDeleteMessage = (messageId) => {
+    if (!session.isActive()) return;
     setConfirmDialog({
       isOpen: true,
       title: 'Thu hồi tin nhắn',
       message: 'Bạn có chắc chắn muốn thu hồi tin nhắn này đối với mọi người trong phòng chat?',
       onConfirm: async () => {
+        if (!session.isActive()) return;
         try {
-          const res = await axios.delete(`${API_BASE}/chat/messages/${messageId}`, {
+          const res = await api.delete(`${API_BASE}/chat/messages/${messageId}`, {
             params: { senderId: currentUser.id }
           });
           const updated = await decryptMessagePayload(res.data);
           setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
         } catch (err) {
+          if (!session.isActive()) return;
           console.error('Lỗi thu hồi tin nhắn.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
         } finally {
-          setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+          if (session.isActive()) setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
         }
       }
     });
   };
 
   const handleToggleReaction = async (messageId, reaction) => {
+    if (!session.isActive()) return;
     try {
       if (settingsRef.current.soundEnabled) soundManager.playReactionSound();
-      const res = await axios.post(`${API_BASE}/chat/messages/reaction`, {
+      const res = await api.post(`${API_BASE}/chat/messages/reaction`, {
         messageId,
         userId: currentUser.id,
         reaction
@@ -628,32 +719,36 @@ export default function App() {
       const updated = await decryptMessagePayload(res.data);
       setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
     } catch (err) {
+      if (!session.isActive()) return;
       console.error('Lỗi thả reaction.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
     }
   };
 
   const handleTogglePinMessage = async (messageId) => {
+    if (!session.isActive()) return;
     try {
-      const res = await axios.put(`${API_BASE}/chat/messages/${messageId}/pin`, null, {
+      const res = await api.put(`${API_BASE}/chat/messages/${messageId}/pin`, null, {
         params: { userId: currentUser.id }
       });
       const updated = await decryptMessagePayload(res.data);
       setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
     } catch (err) {
+      if (!session.isActive()) return;
       console.error('Lỗi ghim tin nhắn.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
     }
   };
 
   const handleSendTyping = async (isTyping) => {
-    if (!activeConv || !currentUser) return;
+    if (!session.isActive() || !activeConv || !currentUser) return;
     try {
-      await axios.post(`${API_BASE}/chat/typing`, {
+      await api.post(`${API_BASE}/chat/typing`, {
         conversationId: activeConv.conversationId,
         userId: currentUser.id,
         userName: currentUser?.displayName || "Người dùng",
         isTyping: Boolean(isTyping)
       });
     } catch (err) {
+      if (!session.isActive()) return;
       console.error('Lỗi gửi typing.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
     }
   };
@@ -664,27 +759,31 @@ export default function App() {
 
     const controller = new AbortController();
     const timer = setTimeout(async () => {
+      if (!session.isActive()) return;
       try {
-        const res = await axios.get(`${API_BASE}/users/search`, {
+        const res = await api.get(`${API_BASE}/users/search`, {
           params: { query, currentUserId: currentUser.id },
           signal: controller.signal
         });
-        setSearchResults({ query, items: res.data });
+        if (!controller.signal.aborted && session.isActive()) setSearchResults({ query, items: res.data });
       } catch (err) {
+        if (controller.signal.aborted || !session.isActive()) return;
         if (err.code !== 'ERR_CANCELED') console.error('Lỗi tìm kiếm user.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
       }
     }, 300);
 
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [searchQuery, currentUser?.id]);
+  }, [searchQuery, currentUser?.id, api, session]);
 
   const handleStartChatWithUser = async (targetUser) => {
+    if (!session.isActive()) return;
     try {
-      const res = await axios.post(`${API_BASE}/chat/conversations/direct`, {
+      const res = await api.post(`${API_BASE}/chat/conversations/direct`, {
         user1Id: currentUser.id,
         user2Id: targetUser.id
       });
       const convData = res.data;
+      if (!session.isActive()) return;
 
       const selectedConv = {
         conversationId: convData.id,
@@ -702,21 +801,25 @@ export default function App() {
       setSearchQuery('');
       fetchConversations(currentUser.id);
     } catch (err) {
+      if (!session.isActive()) return;
       console.error('Lỗi tạo phòng chat.', { status: Number.isInteger(err?.response?.status) ? err.response.status : null });
     }
   };
 
   const handleSendFriendRequest = async (addresseeId) => {
+    if (!session.isActive()) return;
     try {
-      await axios.post(`${API_BASE}/friends/request`, null, {
+      await api.post(`${API_BASE}/friends/request`, null, {
         params: { requesterId: currentUser.id, addresseeId }
       });
+      if (!session.isActive()) return;
       setActiveToast({
         title: 'Thành công',
         content: 'Đã gửi lời mời kết bạn!',
         conversation: null
       });
     } catch (err) {
+      if (!session.isActive()) return;
       setActiveToast({
         title: 'Thông báo',
         content: err.response?.data?.message || 'Lời mời kết bạn đã tồn tại hoặc đã là bạn bè.',
@@ -726,6 +829,7 @@ export default function App() {
   };
 
   const handleGroupCreated = (newGroup) => {
+    if (!session.isActive()) return;
     fetchConversations(currentUser.id);
     handleSelectConversation({
       conversationId: newGroup.id,
@@ -740,27 +844,19 @@ export default function App() {
   };
 
   const handleLeftGroup = () => {
+    if (!session.isActive()) return;
     setActiveConv(null);
     setMessages([]);
     fetchConversations(currentUser.id);
   };
 
   const handleJumpToMessage = (msgId) => {
+    if (!session.isActive()) return;
     const element = document.getElementById(`msg-${msgId}`);
     if (element) {
       element.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   };
-
-  if (!authToken || !currentUser) {
-    return (
-      <AuthScreen
-        onLoginSuccess={handleLoginSuccess}
-        isDarkMode={isDarkMode}
-        onToggleDarkMode={handleToggleDarkMode}
-      />
-    );
-  }
 
   const pinnedMessages = messages.filter((m) => m.isPinned && !m.isDeleted);
 
@@ -906,11 +1002,11 @@ export default function App() {
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
         currentUser={currentUser}
-        onProfileUpdated={(updated) => {
+        onProfileUpdated={session.guard((updated) => {
           const newUser = { ...currentUser, ...updated };
           setCurrentUser(newUser);
           localStorage.setItem('auth_user', JSON.stringify(newUser));
-        }}
+        })}
         settings={settings}
         onUpdateSettings={handleUpdateSettings}
       />
@@ -927,14 +1023,14 @@ export default function App() {
         onClose={() => setIsGroupDetailModalOpen(false)}
         conversation={activeConv}
         currentUserId={currentUser.id}
-        onGroupUpdated={(updatedConv) => {
+        onGroupUpdated={session.guard((updatedConv) => {
           fetchConversations(currentUser.id);
           setActiveConv((prev) => ({
             ...prev,
             title: updatedConv.title,
             theme: updatedConv.theme || prev.theme
           }));
-        }}
+        })}
         onLeftGroup={handleLeftGroup}
         onOpenMediaGallery={() => setIsMediaGalleryOpen(true)}
         isDarkMode={isDarkMode}

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useAuthSession } from '../context/sessionContext';
 import ProtectedMediaImage from './ProtectedMediaImage';
 import { publicMediaUrl } from '../utils/mediaAccess';
 import {
@@ -19,6 +20,7 @@ export default function ForwardModal({
   onConfirmForward,
   isDarkMode
 }) {
+  const session = useAuthSession();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedConvIds, setSelectedConvIds] = useState([]);
   const [isSending, setIsSending] = useState(false);
@@ -41,12 +43,13 @@ export default function ForwardModal({
     setIsSending(true);
     try {
       await onConfirmForward(messageToForward.id, selectedConvIds);
+      if (!session.isActive()) return;
       setSelectedConvIds([]);
       onClose();
     } catch (err) {
-      console.error("Lỗi chuyển tiếp:", err);
+      if (session.isActive()) console.error('Lỗi chuyển tiếp:', err.response?.status || 'forward_failed');
     } finally {
-      setIsSending(false);
+      if (session.isActive()) setIsSending(false);
     }
   };
 
