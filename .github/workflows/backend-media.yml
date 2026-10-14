@@ -28,4 +28,4 @@ jobs:
         run: mvn -B -ntp clean package -DskipTests
       - name: Run SHA-256, Supabase storage and ACL tests
         working-directory: backend
-        run: mvn -B -ntp "-Dtest=SHA256Test,SHA256StreamTest,FileStorageSha256ValidationTest,MediaControllerSecurityTest" test
+        run: mvn -B -ntp "-Dtest=SHA256Test,SHA256StreamTest,FileStorageSha256ValidationTest,MediaControllerSecurityTest,SupabaseMediaStorageErrorTest" test
