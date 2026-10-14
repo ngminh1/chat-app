@@ -769,8 +769,9 @@ private static boolean aesKeysEqual(String first, String second) {
 
     @Transactional(readOnly = true)
     public List<MessageResponse> getMessages(Long conversationId) {
-        List<Message> messageList = messageRepository.findByConversationIdOrderByCreatedAtAsc(conversationId);
-        List<MessageResponse> responses = new ArrayList<>();
+List<Message> messageList =
+    messageRepository.findByConversationIdOrderByIdAsc(conversationId);
+            List<MessageResponse> responses = new ArrayList<>();
         for (Message msg : messageList) {
             responses.add(mapToMessageResponse(msg));
         }
@@ -805,7 +806,7 @@ private static boolean aesKeysEqual(String first, String second) {
                 convAvatar = otherUser.getAvatarUrl();
             }
 
-            List<Message> recent = messageRepository.findByConversationIdOrderByCreatedAtDesc(conv.getId());
+            List<Message> recent = messageRepository.findByConversationIdOrderByIdDesc(conv.getId());
             String lastMessage = "Bắt đầu cuộc trò chuyện mới";
             String lastMessageCiphertext = null;
             String lastMessageIv = null;

@@ -16,7 +16,8 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
     List<Message> findByMediaUrlAndIsDeletedFalse(String mediaUrl);
 
     List<Message> findByConversationIdOrderByCreatedAtAsc(Long conversationId);
-
+    List<Message> findByConversationIdOrderByIdAsc(Long conversationId);
+    List<Message> findByConversationIdOrderByIdDesc(Long conversationId);
     List<Message> findByConversationIdOrderByCreatedAtDesc(Long conversationId);
 
     List<Message> findByConversationIdAndIsPinnedTrueOrderByCreatedAtDesc(Long conversationId);
