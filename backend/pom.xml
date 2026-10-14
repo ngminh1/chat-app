@@ -31,12 +31,6 @@
 	</properties>
 	<dependencies>
 
-        <!-- Cloudflare R2 uses the S3-compatible AWS Java SDK v2. -->
-        <dependency>
-            <groupId>software.amazon.awssdk</groupId>
-            <artifactId>s3</artifactId>
-            <version>2.36.3</version>
-        </dependency>
 
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
