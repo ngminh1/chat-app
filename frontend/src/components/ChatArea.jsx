@@ -244,6 +244,10 @@ export default function ChatArea({
       try {
         const formData = new FormData();
         formData.append('file', selectedFile);
+        // SHA-256 verifies that the server receives exactly the file selected in this browser.
+        const digest = await crypto.subtle.digest('SHA-256', await selectedFile.arrayBuffer());
+        const expectedSha256 = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
+        formData.append('sha256', expectedSha256);
 
         const uploadRes = await axios.post(`${API_BASE}/media/upload`, formData, {
           params: { purpose: 'attachment', conversationId: activeConversation.conversationId },
@@ -256,7 +260,10 @@ export default function ChatArea({
           }
         });
 
-        const { fileUrl, fileName, fileSize, messageType } = uploadRes.data;
+        const { fileUrl, fileName, fileSize, messageType, sha256 } = uploadRes.data;
+        if (sha256 !== expectedSha256) {
+          throw new Error('SHA-256 khong khop sau khi upload');
+        }
 
         await onSendMessage(
           inputText.trim(),

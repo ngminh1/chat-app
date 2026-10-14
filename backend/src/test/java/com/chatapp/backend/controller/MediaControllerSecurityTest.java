@@ -102,19 +102,19 @@ class MediaControllerSecurityTest {
         MockMultipartFile file = new MockMultipartFile("file", "image.png", "image/png", new byte[] {1});
         assertEquals(HttpStatus.UNAUTHORIZED,
                 assertThrows(ResponseStatusException.class,
-                        () -> controller.uploadFile(file, "attachment", 20L)).getStatusCode());
+                        () -> controller.uploadFile(file, "attachment", 20L, null)).getStatusCode());
         login();
         assertEquals(HttpStatus.FORBIDDEN,
                 assertThrows(ResponseStatusException.class,
-                        () -> controller.uploadFile(file, "attachment", 20L)).getStatusCode());
+                        () -> controller.uploadFile(file, "attachment", 20L, null)).getStatusCode());
         when(members.findByConversationIdAndUserId(20L, 1L))
                 .thenReturn(Optional.of(ConversationMember.builder().build()));
-        when(storage.storeFile(file, false, 20L)).thenReturn(new FileUploadResponse());
-        assertEquals(HttpStatus.OK, controller.uploadFile(file, "attachment", 20L).getStatusCode());
+        when(storage.storeFile(file, false, 20L, null)).thenReturn(new FileUploadResponse());
+        assertEquals(HttpStatus.OK, controller.uploadFile(file, "attachment", 20L, null).getStatusCode());
 
         SecurityContextHolder.clearContext();
-        when(storage.storeFile(file, true, null)).thenReturn(new FileUploadResponse());
-        assertEquals(HttpStatus.OK, controller.uploadFile(file, "avatar", null).getStatusCode());
+        when(storage.storeFile(file, true, null, null)).thenReturn(new FileUploadResponse());
+        assertEquals(HttpStatus.OK, controller.uploadFile(file, "avatar", null, null).getStatusCode());
     }
 
     @Test
