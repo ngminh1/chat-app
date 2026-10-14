@@ -1,5 +1,7 @@
 package com.chatapp.backend.security.sha256;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -29,6 +31,34 @@ public final class SHA256 {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is unavailable", e);
         }
+        char[] hex = new char[digest.length * 2];
+        for (int i = 0; i < digest.length; i++) {
+            int b = digest[i] & 0xff;
+            hex[2 * i] = HEX[b >>> 4];
+            hex[2 * i + 1] = HEX[b & 0x0f];
+        }
+        return new String(hex);
+    }
+
+    /**
+     * Hash an input stream incrementally, avoiding loading uploaded files into memory.
+     * The caller owns and closes the input stream.
+     */
+    public static String hashStream(InputStream input) throws IOException {
+        Objects.requireNonNull(input, "input");
+        final MessageDigest md;
+        try {
+            md = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
+        }
+
+        byte[] buffer = new byte[8192];
+        int count;
+        while ((count = input.read(buffer)) != -1) {
+            md.update(buffer, 0, count);
+        }
+        byte[] digest = md.digest();
         char[] hex = new char[digest.length * 2];
         for (int i = 0; i < digest.length; i++) {
             int b = digest[i] & 0xff;
