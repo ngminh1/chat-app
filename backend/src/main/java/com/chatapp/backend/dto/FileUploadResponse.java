@@ -13,4 +13,5 @@ public class FileUploadResponse {
     private String fileName;
     private Long fileSize;
     private MessageType messageType;
+    private String sha256;
 }
