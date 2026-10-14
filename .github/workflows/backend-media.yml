@@ -1,0 +1,31 @@
+name: Backend Supabase media checks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-media.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-media:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+      - name: Compile Supabase-backed Spring Boot
+        working-directory: backend
+        run: mvn -B -ntp clean package -DskipTests
+      - name: Run SHA-256, Supabase storage and ACL tests
+        working-directory: backend
+        run: mvn -B -ntp "-Dtest=SHA256Test,SHA256StreamTest,FileStorageSha256ValidationTest,MediaControllerSecurityTest" test

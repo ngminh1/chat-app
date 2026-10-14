@@ -4,6 +4,8 @@ import com.chatapp.backend.dto.FileUploadResponse;
 import com.chatapp.backend.entity.MessageType;
 import com.chatapp.backend.security.MediaUrls;
 import com.chatapp.backend.security.sha256.SHA256;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
@@ -24,12 +26,19 @@ public class FileStorageService {
     private static final long MAX_UPLOAD_BYTES = 25L * 1024 * 1024;
 
     private final Path fileStorageLocation;
+    private final SupabaseMediaStorage supabaseStorage;
 
-    public FileStorageService() {
-        this(Paths.get("uploads"));
+    @Autowired
+    public FileStorageService(ObjectProvider<SupabaseMediaStorage> supabaseStorageProvider) {
+        this(Paths.get("uploads"), supabaseStorageProvider.getIfAvailable());
     }
 
     FileStorageService(Path storageDirectory) {
+        this(storageDirectory, null);
+    }
+
+    FileStorageService(Path storageDirectory, SupabaseMediaStorage supabaseStorage) {
+        this.supabaseStorage = supabaseStorage;
         this.fileStorageLocation = storageDirectory.toAbsolutePath().normalize();
         try {
             Files.createDirectories(this.fileStorageLocation);
@@ -78,8 +87,13 @@ public class FileStorageService {
 
             String uniqueFileName = (avatar ? "avatar-" : "attachment-" + conversationId + "-")
                     + UUID.randomUUID() + fileExtension;
-            Path targetLocation = this.fileStorageLocation.resolve(uniqueFileName);
-            Files.copy(file.getInputStream(), targetLocation, StandardCopyOption.REPLACE_EXISTING);
+            // With Supabase Storage, the local copy is only a temporary buffer for SHA-256 validation.
+            // It is removed even when hashing or Supabase upload fails.
+            Path targetLocation = supabaseStorage == null
+                    ? this.fileStorageLocation.resolve(uniqueFileName)
+                    : Files.createTempFile("dispatch-upload-", ".tmp");
+            try {
+                Files.copy(file.getInputStream(), targetLocation, StandardCopyOption.REPLACE_EXISTING);
             String actualSha256;
             try (InputStream savedFile = Files.newInputStream(targetLocation)) {
                 actualSha256 = SHA256.hashStream(savedFile);
@@ -97,6 +111,9 @@ public class FileStorageService {
             }
 
             String contentType = file.getContentType();
+            if (supabaseStorage != null) {
+                supabaseStorage.upload(targetLocation, uniqueFileName, contentType);
+            }
             MessageType messageType = MessageType.FILE;
             if (contentType != null && contentType.startsWith("image/")) {
                 messageType = MessageType.IMAGE;
@@ -111,26 +128,44 @@ public class FileStorageService {
                     .sha256(actualSha256)
                     .messageType(messageType)
                     .build();
-
+            } finally {
+                if (supabaseStorage != null) {
+                    Files.deleteIfExists(targetLocation);
+                }
+            }
         } catch (IOException ex) {
             throw new RuntimeException("Không thể lưu file " + originalFileName, ex);
         }
     }
 
     public Resource loadFileAsResource(String fileName) {
+        if (supabaseStorage != null) {
+            try {
+                return supabaseStorage.loadFileAsResource(fileName);
+            } catch (org.springframework.web.server.ResponseStatusException e) {
+                // Allow previously stored local files to remain accessible during migration.
+                // If Supabase Storage is temporarily unavailable, do NOT treat it as a missing file.
+                if (e.getStatusCode() != org.springframework.http.HttpStatus.NOT_FOUND) {
+                    throw e;
+                }
+            }
+        }
         try {
             Path filePath = this.fileStorageLocation.resolve(fileName).normalize();
             if (!filePath.startsWith(this.fileStorageLocation) || !Files.isRegularFile(filePath)) {
-                throw new RuntimeException("Không tìm thấy tệp tin: " + fileName);
+                throw new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Tệp không còn tồn tại trên máy chủ");
             }
             Resource resource = new UrlResource(filePath.toUri());
             if (resource.exists()) {
                 return resource;
             } else {
-                throw new RuntimeException("Không tìm thấy tệp tin: " + fileName);
+                throw new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Tệp không còn tồn tại trên máy chủ");
             }
         } catch (MalformedURLException ex) {
-            throw new RuntimeException("Không tìm thấy tệp tin: " + fileName, ex);
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.NOT_FOUND, "Đường dẫn tệp không hợp lệ", ex);
         }
     }
 }
