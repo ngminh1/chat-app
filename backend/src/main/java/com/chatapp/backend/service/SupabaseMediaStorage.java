@@ -13,6 +13,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.time.Duration;
 
 /** Private object storage, reached only through Dispatch's authenticated media API. */
@@ -80,7 +82,7 @@ public class SupabaseMediaStorage {
             HttpResponse<byte[]> response = client.send(
                     authenticatedRequest(fileName, true).timeout(Duration.ofSeconds(90)).GET().build(),
                     HttpResponse.BodyHandlers.ofByteArray());
-            if (response.statusCode() == 404) {
+            if (isMissingObjectResponse(response.statusCode(), response.body())) {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Media not present on Supabase");
             }
             if (response.statusCode() != 200) {
@@ -97,6 +99,23 @@ public class SupabaseMediaStorage {
             Thread.currentThread().interrupt();
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Download interrupted", e);
         }
+    }
+
+    /**
+     * Supabase Storage may report a missing object as HTTP 400 with an
+     * embedded 404/NoSuchKey error (legacy response format). Distinguish
+     * this from real 400/401/403 errors, which must not be called "missing".
+     */
+    static boolean isMissingObjectResponse(int statusCode, byte[] body) {
+        if (statusCode == 404) return true;
+        if (statusCode != 400 || body == null || body.length == 0) return false;
+        String details = new String(body, 0, Math.min(body.length, 4096), StandardCharsets.UTF_8)
+                .replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+        return details.contains("\"code\":\"nosuchkey\"")
+                || details.contains("\"message\":\"objectnotfound\"")
+                || (details.contains("\"error\":\"not_found\"")
+                    && (details.contains("\"statuscode\":\"404\"")
+                        || details.contains("\"statuscode\":404")));
     }
 
     private HttpRequest.Builder authenticatedRequest(String fileName) {
