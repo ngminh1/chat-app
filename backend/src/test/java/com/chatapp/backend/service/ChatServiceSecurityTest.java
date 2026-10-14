@@ -104,7 +104,7 @@ class ChatServiceSecurityTest {
         when(members.findByConversationIdAndUserId(10L, 1L))
                 .thenReturn(Optional.of(ConversationMember.builder().build()));
         when(messages.existsByConversationIdAndCiphertextIsNotNull(10L)).thenReturn(true);
-        assertThrows(IllegalStateException.class, () -> service.getOrCreateConversationAesKey(10L, 1L));
+        assertThrows(MissingConversationKeyException.class, () -> service.getOrCreateConversationAesKey(10L, 1L));
         verify(conversations, never()).save(any(Conversation.class));
     }
 

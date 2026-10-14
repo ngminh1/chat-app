@@ -12,6 +12,9 @@ import com.chatapp.backend.repository.FriendshipRepository;
 import com.chatapp.backend.repository.MessageRepository;
 import com.chatapp.backend.security.RequestAccess;
 import com.chatapp.backend.service.ChatService;
+import com.chatapp.backend.service.MissingConversationKeyException;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -25,6 +28,9 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 
 class ChatControllerAccessTest {
     private final ConversationMemberRepository members = mock(ConversationMemberRepository.class);
@@ -56,6 +62,23 @@ class ChatControllerAccessTest {
         assertForbidden(() -> controller.getMessages(20L));
         assertForbidden(() -> controller.getConversationMedia(20L));
         assertForbidden(() -> controller.getConversationAesKey(20L, User.builder().id(1L).build()));
+    }
+
+    @Test
+    void missingHistoricalKeyReturnsSpecificCodeOnlyAfterMembershipCheck() throws Exception {
+        var mvc = MockMvcBuilders.standaloneSetup(controller)
+                .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver()).build();
+        String url = "/api/chat/conversations/20/aes-key";
+        mvc.perform(get(url)).andExpect(status().isUnauthorized());
+        loginAs(1);
+        mvc.perform(get(url)).andExpect(status().isForbidden());
+        verifyNoInteractions(service);
+
+        when(members.findByConversationIdAndUserId(20L, 1L))
+                .thenReturn(Optional.of(ConversationMember.builder().build()));
+        when(service.getOrCreateConversationAesKey(20L, 1L)).thenThrow(new MissingConversationKeyException());
+        mvc.perform(get(url)).andExpect(status().isConflict())
+                .andExpect(content().json("{\"code\":\"CONVERSATION_AES_KEY_MISSING\"}"));
     }
 
     @Test

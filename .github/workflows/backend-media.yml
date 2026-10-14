@@ -1,10 +1,11 @@
-name: Backend Supabase media checks
+name: Dispatch encryption and media checks
 
 on:
   pull_request:
     branches: [main]
     paths:
       - 'backend/**'
+      - 'frontend/**'
       - '.github/workflows/backend-media.yml'
   workflow_dispatch:
 
@@ -23,9 +24,26 @@ jobs:
           java-version: '21'
           cache: maven
           cache-dependency-path: backend/pom.xml
-      - name: Compile Supabase-backed Spring Boot
+      - name: Compile, test and package Spring Boot with isolated H2
         working-directory: backend
-        run: mvn -B -ntp clean package -DskipTests
-      - name: Run SHA-256, Supabase storage and ACL tests
-        working-directory: backend
-        run: mvn -B -ntp "-Dtest=SHA256Test,SHA256StreamTest,FileStorageSha256ValidationTest,MediaControllerSecurityTest,SupabaseMediaStorageErrorTest" test
+        run: mvn -B -ntp clean package
+
+  build-frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Test encryption, media lifecycle and audio activation
+        working-directory: frontend
+        run: npm test
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build

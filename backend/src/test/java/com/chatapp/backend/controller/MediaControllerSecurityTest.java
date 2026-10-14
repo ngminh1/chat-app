@@ -26,6 +26,10 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Optional;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -125,6 +129,32 @@ class MediaControllerSecurityTest {
                                 "/api/media/files/attachment-20-random.png")).getStatusCode());
         assertDoesNotThrow(() -> MediaUrls.requirePublicAvatarUrl(
                 "/api/media/files/avatar-random.png"));
+    }
+
+    @Test
+    void missingAndUnavailableMediaKeepTheirHttpStatusAndDatabaseReference() throws Exception {
+        String name = "attachment-20-legacy.png";
+        Message reference = Message.builder().id(50L)
+                .conversation(Conversation.builder().id(20L).build()).build();
+        when(messages.findByMediaUrlAndIsDeletedFalse(MediaUrls.FILES + name))
+                .thenReturn(List.of(reference));
+        var mvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+        mvc.perform(get(MediaUrls.FILES + name)).andExpect(status().isUnauthorized());
+        login();
+        mvc.perform(get(MediaUrls.FILES + name)).andExpect(status().isForbidden());
+        verifyNoInteractions(storage);
+
+        when(members.findByConversationIdAndUserId(20L, 1L))
+                .thenReturn(Optional.of(ConversationMember.builder().build()));
+        for (HttpStatus failure : List.of(HttpStatus.NOT_FOUND,
+                HttpStatus.INTERNAL_SERVER_ERROR, HttpStatus.SERVICE_UNAVAILABLE)) {
+            doThrow(new ResponseStatusException(failure)).when(storage).loadFileAsResource(name);
+            mvc.perform(get(MediaUrls.FILES + name)).andExpect(status().is(failure.value()));
+        }
+        verify(messages, never()).delete(any(Message.class));
+        verify(messages, never()).deleteById(anyLong());
+        verify(messages, never()).save(any(Message.class));
     }
 
     @Test

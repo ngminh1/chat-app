@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
+import { useAuthSession } from '../context/sessionContext';
 import { X, Users, Check, Search, Loader2, UserPlus, Camera } from 'lucide-react';
 import { API_BASE } from '../config/api';
 import { publicMediaUrl } from '../utils/mediaAccess';
 
 export default function CreateGroupModal({ isOpen, onClose, currentUserId, onGroupCreated }) {
+  const session = useAuthSession();
+  const api = session.api;
   const [groupTitle, setGroupTitle] = useState('');
   const [selectedAvatarFile, setSelectedAvatarFile] = useState(null);
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState(null);
@@ -26,12 +28,12 @@ export default function CreateGroupModal({ isOpen, onClose, currentUserId, onGro
       setSelectedUserIds([]);
       setSearchFriend('');
 
-      axios.get(`${API_BASE}/friends/${currentUserId}`)
-        .then((res) => setFriends(res.data))
-        .catch((err) => console.error("Lỗi lấy danh sách bạn:", err))
-        .finally(() => setLoading(false));
+      api.get(`${API_BASE}/friends/${currentUserId}`)
+        .then(session.guard((res) => setFriends(res.data)))
+        .catch(session.guard((err) => console.error('Lỗi lấy danh sách bạn:', err.response?.status || 'friends_failed')))
+        .finally(session.guard(() => setLoading(false)));
     }
-  }, [isOpen, currentUserId]);
+  }, [isOpen, currentUserId, api, session]);
 
   if (!isOpen) return null;
 
@@ -67,6 +69,7 @@ export default function CreateGroupModal({ isOpen, onClose, currentUserId, onGro
 
   const handleCreateGroup = async (e) => {
     e.preventDefault();
+    if (!session.isActive()) return;
     if (selectedUserIds.length === 0 || submitting) return;
 
     setSubmitting(true);
@@ -76,27 +79,30 @@ export default function CreateGroupModal({ isOpen, onClose, currentUserId, onGro
       if (selectedAvatarFile) {
         const formData = new FormData();
         formData.append('file', selectedAvatarFile);
-        const uploadRes = await axios.post(`${API_BASE}/media/upload`, formData, {
+        const uploadRes = await api.post(`${API_BASE}/media/upload`, formData, {
           params: { purpose: 'avatar' },
           headers: { 'Content-Type': 'multipart/form-data' }
         });
+        if (!session.isActive()) return;
         uploadedAvatarUrl = uploadRes.data.fileUrl;
       }
 
-      const res = await axios.post(`${API_BASE}/chat/conversations/group`, {
+      const res = await api.post(`${API_BASE}/chat/conversations/group`, {
         title: groupTitle.trim(),
         avatarUrl: uploadedAvatarUrl,
         creatorId: currentUserId,
         memberIds: selectedUserIds
       });
 
+      if (!session.isActive()) return;
       onGroupCreated(res.data);
       onClose();
     } catch (err) {
-      console.error("Lỗi tạo nhóm:", err);
+      if (!session.isActive()) return;
+      console.error('Lỗi tạo nhóm:', err.response?.status || 'create_group_failed');
       alert(err.response?.data?.message || "Không thể tạo nhóm trò chuyện. Vui lòng thử lại!");
     } finally {
-      setSubmitting(false);
+      if (session.isActive()) setSubmitting(false);
     }
   };
 

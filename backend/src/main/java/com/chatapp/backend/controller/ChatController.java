@@ -4,6 +4,7 @@ import com.chatapp.backend.dto.*;
 import com.chatapp.backend.entity.Conversation;
 import com.chatapp.backend.entity.User;
 import com.chatapp.backend.service.ChatService;
+import com.chatapp.backend.service.MissingConversationKeyException;
 import com.chatapp.backend.security.RequestAccess;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -11,6 +12,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/chat")
@@ -19,6 +21,12 @@ public class ChatController {
 
     private final ChatService chatService;
     private final RequestAccess access;
+
+    @ExceptionHandler(MissingConversationKeyException.class)
+    public ResponseEntity<Map<String, String>> missingConversationKey() {
+        return ResponseEntity.status(org.springframework.http.HttpStatus.CONFLICT)
+                .body(Map.of("code", "CONVERSATION_AES_KEY_MISSING"));
+    }
 
     // Real-time Presence
     @PutMapping("/presence")

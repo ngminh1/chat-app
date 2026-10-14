@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import { useAuthSession } from '../context/sessionContext';
 import {
   X,
   Users,
@@ -28,6 +28,8 @@ export default function GroupDetailModal({
   onOpenMediaGallery,
   isDarkMode
 }) {
+  const session = useAuthSession();
+  const api = session.api;
   const [members, setMembers] = useState([]);
   const [friends, setFriends] = useState([]);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -43,24 +45,26 @@ export default function GroupDetailModal({
   const targetTitle = conversation?.title || conversation?.otherUser?.displayName || 'U';
 
   const fetchMembers = async () => {
-    if (!conversation) return;
+    if (!conversation || !session.isActive()) return;
     setLoading(true);
     try {
-      const res = await axios.get(`${API_BASE}/chat/conversations/${conversation.conversationId}/members`);
+      const res = await api.get(`${API_BASE}/chat/conversations/${conversation.conversationId}/members`);
+      if (!session.isActive()) return;
       setMembers(res.data);
     } catch (err) {
-      console.error("Lỗi lấy danh sách thành viên:", err);
+      if (session.isActive()) console.error('Lỗi lấy danh sách thành viên:', err.response?.status || 'members_failed');
     } finally {
-      setLoading(false);
+      if (session.isActive()) setLoading(false);
     }
   };
 
   const fetchFriends = async () => {
     try {
-      const res = await axios.get(`${API_BASE}/friends/${currentUserId}`);
+      const res = await api.get(`${API_BASE}/friends/${currentUserId}`);
+      if (!session.isActive()) return;
       setFriends(res.data);
     } catch (err) {
-      console.error("Lỗi lấy danh sách bạn bè:", err);
+      if (session.isActive()) console.error('Lỗi lấy danh sách bạn bè:', err.response?.status || 'friends_failed');
     }
   };
 
@@ -84,18 +88,20 @@ export default function GroupDetailModal({
   const isAdmin = currentMemberObj?.role === 'ADMIN';
 
   const handleChangeTheme = async (themeKey) => {
+    if (!session.isActive()) return;
     setSelectedTheme(themeKey);
     onGroupUpdated({ ...conversation, theme: themeKey });
 
     try {
-      const res = await axios.put(
+      const res = await api.put(
         `${API_BASE}/chat/conversations/${conversation.conversationId}/theme`,
         null,
         { params: { theme: themeKey } }
       );
+      if (!session.isActive()) return;
       onGroupUpdated(res.data);
     } catch (err) {
-      console.error("Lỗi đổi theme:", err);
+      if (session.isActive()) console.error('Lỗi đổi theme:', err.response?.status || 'theme_failed');
     }
   };
 
@@ -103,34 +109,37 @@ export default function GroupDetailModal({
     if (!newTitle.trim()) return;
     setActionLoading(true);
     try {
-      const res = await axios.put(
+      const res = await api.put(
         `${API_BASE}/chat/conversations/${conversation.conversationId}/group-info`,
         { title: newTitle.trim() },
         { params: { currentUserId } }
       );
+      if (!session.isActive()) return;
       setIsEditingTitle(false);
       onGroupUpdated(res.data);
     } catch (err) {
-      console.error("Lỗi đổi tên nhóm:", err);
+      if (session.isActive()) console.error('Lỗi đổi tên nhóm:', err.response?.status || 'group_title_failed');
     } finally {
-      setActionLoading(false);
+      if (session.isActive()) setActionLoading(false);
     }
   };
 
   const handleAddMember = async (targetUserId) => {
     setActionLoading(true);
     try {
-      await axios.post(
+      await api.post(
         `${API_BASE}/chat/conversations/${conversation.conversationId}/members`,
         null,
         { params: { currentUserId, targetUserId } }
       );
+      if (!session.isActive()) return;
       await fetchMembers();
+      if (!session.isActive()) return;
       setIsAddingMember(false);
     } catch (err) {
-      alert(err.response?.data?.message || "Không thể thêm thành viên");
+      if (session.isActive()) alert(err.response?.data?.message || "Không thể thêm thành viên");
     } finally {
-      setActionLoading(false);
+      if (session.isActive()) setActionLoading(false);
     }
   };
 
@@ -138,15 +147,16 @@ export default function GroupDetailModal({
     if (!window.confirm(`Bạn có chắc chắn muốn xóa "${targetName}" khỏi nhóm?`)) return;
     setActionLoading(true);
     try {
-      await axios.delete(
+      await api.delete(
         `${API_BASE}/chat/conversations/${conversation.conversationId}/members/${targetUserId}`,
         { params: { currentUserId } }
       );
+      if (!session.isActive()) return;
       await fetchMembers();
     } catch (err) {
-      alert(err.response?.data?.message || "Không thể xóa thành viên");
+      if (session.isActive()) alert(err.response?.data?.message || "Không thể xóa thành viên");
     } finally {
-      setActionLoading(false);
+      if (session.isActive()) setActionLoading(false);
     }
   };
 
@@ -154,17 +164,18 @@ export default function GroupDetailModal({
     if (!window.confirm("Bạn có chắc chắn muốn rời khỏi nhóm này?")) return;
     setActionLoading(true);
     try {
-      await axios.post(
+      await api.post(
         `${API_BASE}/chat/conversations/${conversation.conversationId}/leave`,
         null,
         { params: { userId: currentUserId } }
       );
+      if (!session.isActive()) return;
       onLeftGroup(conversation.conversationId);
       onClose();
     } catch (err) {
-      console.error("Lỗi rời nhóm:", err);
+      if (session.isActive()) console.error('Lỗi rời nhóm:', err.response?.status || 'leave_group_failed');
     } finally {
-      setActionLoading(false);
+      if (session.isActive()) setActionLoading(false);
     }
   };
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import { useAuthSession } from '../context/sessionContext';
 import {
   X,
   Image as ImageIcon,
@@ -13,7 +13,7 @@ import {
 import { formatSidebarTime } from '../utils/formatTime';
 import { API_BASE } from '../config/api';
 import ProtectedMediaImage from './ProtectedMediaImage';
-import { downloadMedia } from '../utils/mediaAccess';
+import ProtectedMediaDownload from './ProtectedMediaDownload';
 
 export default function MediaGalleryModal({
   isOpen,
@@ -22,6 +22,8 @@ export default function MediaGalleryModal({
   conversationTitle,
   isDarkMode
 }) {
+  const session = useAuthSession();
+  const api = session.api;
   const [activeTab, setActiveTab] = useState('images');
   const [mediaList, setMediaList] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -30,12 +32,12 @@ export default function MediaGalleryModal({
   useEffect(() => {
     if (isOpen && conversationId) {
       setLoading(true);
-      axios.get(`${API_BASE}/chat/conversations/${conversationId}/media`)
-        .then((res) => setMediaList(res.data))
-        .catch((err) => console.error("Lỗi lấy media:", err))
-        .finally(() => setLoading(false));
+      api.get(`${API_BASE}/chat/conversations/${conversationId}/media`)
+        .then(session.guard((res) => setMediaList(res.data)))
+        .catch(session.guard((err) => console.error('Lỗi lấy media:', err.response?.status || 'media_list_failed')))
+        .finally(session.guard(() => setLoading(false)));
     }
-  }, [isOpen, conversationId]);
+  }, [isOpen, conversationId, api, session]);
 
   if (!isOpen) return null;
 
@@ -127,7 +129,7 @@ export default function MediaGalleryModal({
                     onClick={() => setPreviewImg(item.mediaUrl)}
                   >
                     <ProtectedMediaImage src={item.mediaUrl} alt="" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2">
+                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2">
                       <div className="flex justify-end">
                         <span className="p-1 bg-black/40 rounded-full text-white backdrop-blur-xs">
                           <Eye className="w-3.5 h-3.5" />
@@ -176,14 +178,13 @@ export default function MediaGalleryModal({
                     </div>
 
                     <div className="flex items-center gap-1.5 flex-shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => downloadMedia(item.mediaUrl, item.fileName).catch(console.error)}
+                      <ProtectedMediaDownload
+                        src={item.mediaUrl}
+                        fileName={item.fileName}
                         className="p-1.5 bg-white dark:bg-slate-700 hover:bg-[#0062FF] hover:text-white text-[#0062FF] dark:text-slate-200 rounded-lg shadow-xs transition-colors"
-                        title="Tải về"
                       >
                         <Download className="w-4 h-4" />
-                      </button>
+                      </ProtectedMediaDownload>
                     </div>
                   </div>
                 ))}

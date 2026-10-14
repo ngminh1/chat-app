@@ -5,6 +5,14 @@
 const AES_NAME = 'AES-GCM';
 const AES_KEY_LENGTH = 256;
 const GCM_IV_LENGTH = 12; // 96 bit - kích thước IV khuyến nghị cho GCM
+const GCM_TAG_LENGTH = 128;
+export const AES_ENCRYPTION_VERSION = 'AES-256-GCM';
+
+function invalidCiphertext() {
+  const error = new Error('Ciphertext hoặc IV AES-GCM không hợp lệ');
+  error.name = 'InvalidCiphertextError';
+  return error;
+}
 
 export function textToBytes(text) {
   return new TextEncoder().encode(text ?? '');
@@ -77,7 +85,8 @@ export async function encryptMessage(plaintext, key) {
   const encryptedBuffer = await crypto.subtle.encrypt(
     {
       name: AES_NAME,
-      iv
+      iv,
+      tagLength: GCM_TAG_LENGTH
     },
     key,
     data
@@ -86,25 +95,32 @@ export async function encryptMessage(plaintext, key) {
   return {
     ciphertext: bytesToBase64(encryptedBuffer),
     iv: bytesToBase64(iv),
-    encryptionVersion: 'AES-256-GCM'
+    encryptionVersion: AES_ENCRYPTION_VERSION
   };
 }
 
 export async function decryptMessage(ciphertextBase64, ivBase64, key) {
   if (!key) throw new Error('Thiếu AES key');
-  if (!ciphertextBase64 || !ivBase64) throw new Error('Thiếu ciphertext hoặc IV');
+  if (!ciphertextBase64 || !ivBase64) throw invalidCiphertext();
 
-  const ciphertext = base64ToBytes(ciphertextBase64);
-  const iv = base64ToBytes(ivBase64);
+  let ciphertext;
+  let iv;
+  try {
+    ciphertext = base64ToBytes(ciphertextBase64);
+    iv = base64ToBytes(ivBase64);
+  } catch {
+    throw invalidCiphertext();
+  }
 
-  if (iv.byteLength !== GCM_IV_LENGTH) {
-    throw new Error(`IV AES-GCM phải dài ${GCM_IV_LENGTH} byte`);
+  if (iv.byteLength !== GCM_IV_LENGTH || ciphertext.byteLength < GCM_TAG_LENGTH / 8) {
+    throw invalidCiphertext();
   }
 
   const decryptedBuffer = await crypto.subtle.decrypt(
     {
       name: AES_NAME,
-      iv
+      iv,
+      tagLength: GCM_TAG_LENGTH
     },
     key,
     ciphertext

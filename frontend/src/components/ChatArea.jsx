@@ -1,5 +1,5 @@
 import { Fragment, useState, useEffect, useRef, useCallback } from 'react';
-import axios from 'axios';
+import { useAuthSession } from '../context/sessionContext';
 import {
   Send,
   Info,
@@ -32,7 +32,8 @@ import { CHAT_THEMES } from '../utils/themeConfig';
 import { ChatTimelineSkeleton } from './Skeletons';
 import { API_BASE } from '../config/api';
 import ProtectedMediaImage from './ProtectedMediaImage';
-import { downloadMedia, publicMediaUrl } from '../utils/mediaAccess';
+import ProtectedMediaDownload from './ProtectedMediaDownload';
+import { publicMediaUrl } from '../utils/mediaAccess';
 
 const REACTION_LIST = ['👍', '❤️', '😂', '😮', '😢', '😡'];
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // Giới hạn 25MB
@@ -58,6 +59,8 @@ export default function ChatArea({
   presenceMap,
   lastSeenMap
 }) {
+  const session = useAuthSession();
+  const api = session.api;
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
@@ -90,6 +93,15 @@ export default function ChatArea({
   const imageInputRef = useRef(null);
   const fileInputRef = useRef(null);
 
+  useEffect(() => () => clearTimeout(typingTimeoutRef.current), []);
+
+  useEffect(() => {
+    // Replacing a selection, changing conversations and unmounting all release its preview.
+    return () => {
+      if (filePreviewUrl) URL.revokeObjectURL(filePreviewUrl);
+    };
+  }, [filePreviewUrl]);
+
   const currentTheme = CHAT_THEMES[activeConversation?.theme] || CHAT_THEMES.blue;
 
   const handleScroll = () => {
@@ -118,15 +130,17 @@ export default function ChatArea({
   }, [activeConversation?.conversationId]);
 
   const jumpToMessageId = useCallback((msgId) => {
+    if (!session.isActive()) return;
     setHighlightedMsgId(msgId);
     const element = document.getElementById(`msg-${msgId}`);
     if (element) {
       element.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
     setTimeout(() => {
+      if (!session.isActive()) return;
       setHighlightedMsgId(null);
     }, 2500);
-  }, []);
+  }, [session]);
 
   const firstSearchMessageId = searchResults[0]?.id;
   useEffect(() => {
@@ -201,10 +215,7 @@ export default function ChatArea({
   function removeSelectedFile() {
     setSelectedFile(null);
     setUploadPercent(0);
-    if (filePreviewUrl) {
-      URL.revokeObjectURL(filePreviewUrl);
-      setFilePreviewUrl(null);
-    }
+    setFilePreviewUrl(null);
   }
 
   const formatFileSize = (bytes) => {
@@ -217,6 +228,7 @@ export default function ChatArea({
 
   const handleSubmit = async (e) => {
     if (e) e.preventDefault();
+    if (!session.isActive()) return;
     if ((!inputText.trim() && !selectedFile) || isSending || isUploading) return;
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -228,12 +240,13 @@ export default function ChatArea({
       setIsSending(true);
       try {
         await onEditMessage(editingMessage.id, inputText.trim());
+        if (!session.isActive()) return;
         setEditingMessage(null);
         setInputText('');
       } catch {
-        setSendErrorMessage("Không thể chỉnh sửa tin nhắn.");
+        if (session.isActive()) setSendErrorMessage("Không thể chỉnh sửa tin nhắn.");
       } finally {
-        setIsSending(false);
+        if (session.isActive()) setIsSending(false);
       }
       return;
     }
@@ -246,19 +259,23 @@ export default function ChatArea({
         formData.append('file', selectedFile);
         // SHA-256 verifies that the server receives exactly the file selected in this browser.
         const digest = await crypto.subtle.digest('SHA-256', await selectedFile.arrayBuffer());
+        if (!session.isActive()) return;
         const expectedSha256 = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
         formData.append('sha256', expectedSha256);
 
-        const uploadRes = await axios.post(`${API_BASE}/media/upload`, formData, {
+        const uploadRes = await api.post(`${API_BASE}/media/upload`, formData, {
           params: { purpose: 'attachment', conversationId: activeConversation.conversationId },
           headers: { 'Content-Type': 'multipart/form-data' },
           onUploadProgress: (progressEvent) => {
+            if (!session.isActive()) return;
             if (progressEvent.total) {
               const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
               setUploadPercent(percent);
             }
           }
         });
+
+        if (!session.isActive()) return;
 
         const { fileUrl, fileName, fileSize, messageType, sha256 } = uploadRes.data;
         if (sha256 !== expectedSha256) {
@@ -274,16 +291,21 @@ export default function ChatArea({
           fileSize
         );
 
+        if (!session.isActive()) return;
+
         removeSelectedFile();
         setInputText('');
         setReplyingTo(null);
         scrollToBottom('smooth');
       } catch (err) {
-        console.error("Lỗi gửi file:", err);
+        if (!session.isActive()) return;
+        console.error('Lỗi gửi file:', err.response?.status || 'upload_failed');
         setSendErrorMessage("Không thể tải lên hoặc gửi tệp tin.");
       } finally {
-        setIsUploading(false);
-        setUploadPercent(0);
+        if (session.isActive()) {
+          setIsUploading(false);
+          setUploadPercent(0);
+        }
       }
       return;
     }
@@ -298,10 +320,11 @@ export default function ChatArea({
       scrollToBottom('smooth');
       await onSendMessage(text, replyId, 'TEXT', null, null, null);
     } catch (err) {
-      console.error("Lỗi gửi tin nhắn:", err);
+      if (!session.isActive()) return;
+      console.error('Lỗi gửi tin nhắn:', err.response?.status || 'send_failed');
       setSendErrorMessage("Không thể gửi tin nhắn.");
     } finally {
-      setIsSending(false);
+      if (session.isActive()) setIsSending(false);
     }
   };
 
@@ -314,7 +337,7 @@ export default function ChatArea({
       onSendTyping(true);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = setTimeout(() => {
-        onSendTyping(false);
+        if (session.isActive()) onSendTyping(false);
       }, 2000);
     } else {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -328,15 +351,17 @@ export default function ChatArea({
     setSendErrorMessage('');
     try {
       await onSendMessage('👍', null, 'TEXT', null, null, null);
+      if (!session.isActive()) return;
       scrollToBottom('smooth');
     } catch {
-      setSendErrorMessage("Không thể gửi biểu tượng chào.");
+      if (session.isActive()) setSendErrorMessage("Không thể gửi biểu tượng chào.");
     } finally {
-      setIsSending(false);
+      if (session.isActive()) setIsSending(false);
     }
   };
 
   const handleStartEdit = (msg) => {
+    if (msg.decryptionFailed) return;
     setEditingMessage(msg);
     setReplyingTo(null);
     removeSelectedFile();
@@ -623,7 +648,7 @@ export default function ChatArea({
                           <Reply className="w-3.5 h-3.5" />
                         </button>
 
-                        <button onClick={() => onStartForwardMessage(msg)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-400 hover:text-slate-600 cursor-pointer" title="Chuyển tiếp">
+                        <button disabled={msg.decryptionFailed} onClick={() => !msg.decryptionFailed && onStartForwardMessage(msg)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-400 hover:text-slate-600 cursor-pointer disabled:opacity-50 disabled:cursor-default" title="Chuyển tiếp">
                           <Share2 className="w-3.5 h-3.5" />
                         </button>
 
@@ -633,7 +658,7 @@ export default function ChatArea({
 
                         {isMe && (
                           <>
-                            {!isImage && !isFile && (
+                            {!isImage && !isFile && !msg.decryptionFailed && (
                               <button onClick={() => handleStartEdit(msg)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-400 hover:text-slate-600 cursor-pointer" title="Chỉnh sửa">
                                 <Edit2 className="w-3.5 h-3.5" />
                               </button>
@@ -689,9 +714,9 @@ export default function ChatArea({
                             <p className="text-xs text-slate-400 mt-0.5">{formatFileSize(msg.fileSize)}</p>
                           </div>
                           {msg.mediaUrl && (
-                            <button type="button" onClick={() => downloadMedia(msg.mediaUrl, msg.fileName).catch(console.error)} className="p-2 bg-white dark:bg-slate-900 hover:bg-[#0062FF] hover:text-white text-[#0062FF] rounded-xl shadow-xs flex-shrink-0 transition-colors">
+                            <ProtectedMediaDownload src={msg.mediaUrl} fileName={msg.fileName} className="p-2 bg-white dark:bg-slate-900 hover:bg-[#0062FF] hover:text-white text-[#0062FF] rounded-xl shadow-xs flex-shrink-0 transition-colors">
                               <Download className="w-4 h-4" />
-                            </button>
+                            </ProtectedMediaDownload>
                           )}
                         </div>
                       ) : isLike ? (
