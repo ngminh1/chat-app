@@ -4,6 +4,8 @@ import com.chatapp.backend.dto.FileUploadResponse;
 import com.chatapp.backend.entity.MessageType;
 import com.chatapp.backend.security.MediaUrls;
 import com.chatapp.backend.security.sha256.SHA256;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
@@ -24,12 +26,19 @@ public class FileStorageService {
     private static final long MAX_UPLOAD_BYTES = 25L * 1024 * 1024;
 
     private final Path fileStorageLocation;
+    private final R2MediaStorage r2Storage;
 
-    public FileStorageService() {
-        this(Paths.get("uploads"));
+    @Autowired
+    public FileStorageService(ObjectProvider<R2MediaStorage> r2StorageProvider) {
+        this(Paths.get("uploads"), r2StorageProvider.getIfAvailable());
     }
 
     FileStorageService(Path storageDirectory) {
+        this(storageDirectory, null);
+    }
+
+    FileStorageService(Path storageDirectory, R2MediaStorage r2Storage) {
+        this.r2Storage = r2Storage;
         this.fileStorageLocation = storageDirectory.toAbsolutePath().normalize();
         try {
             Files.createDirectories(this.fileStorageLocation);
@@ -78,8 +87,13 @@ public class FileStorageService {
 
             String uniqueFileName = (avatar ? "avatar-" : "attachment-" + conversationId + "-")
                     + UUID.randomUUID() + fileExtension;
-            Path targetLocation = this.fileStorageLocation.resolve(uniqueFileName);
-            Files.copy(file.getInputStream(), targetLocation, StandardCopyOption.REPLACE_EXISTING);
+            // With R2, the local copy is only a temporary buffer for SHA-256 validation.
+            // It is removed even when hashing or R2 upload fails.
+            Path targetLocation = r2Storage == null
+                    ? this.fileStorageLocation.resolve(uniqueFileName)
+                    : Files.createTempFile("dispatch-upload-", ".tmp");
+            try {
+                Files.copy(file.getInputStream(), targetLocation, StandardCopyOption.REPLACE_EXISTING);
             String actualSha256;
             try (InputStream savedFile = Files.newInputStream(targetLocation)) {
                 actualSha256 = SHA256.hashStream(savedFile);
@@ -97,6 +111,9 @@ public class FileStorageService {
             }
 
             String contentType = file.getContentType();
+            if (r2Storage != null) {
+                r2Storage.upload(targetLocation, uniqueFileName, contentType);
+            }
             MessageType messageType = MessageType.FILE;
             if (contentType != null && contentType.startsWith("image/")) {
                 messageType = MessageType.IMAGE;
@@ -111,13 +128,28 @@ public class FileStorageService {
                     .sha256(actualSha256)
                     .messageType(messageType)
                     .build();
-
+            } finally {
+                if (r2Storage != null) {
+                    Files.deleteIfExists(targetLocation);
+                }
+            }
         } catch (IOException ex) {
             throw new RuntimeException("Không thể lưu file " + originalFileName, ex);
         }
     }
 
     public Resource loadFileAsResource(String fileName) {
+        if (r2Storage != null) {
+            try {
+                return r2Storage.loadFileAsResource(fileName);
+            } catch (org.springframework.web.server.ResponseStatusException e) {
+                // Allow previously stored local files to remain accessible during migration.
+                // If R2 is temporarily unavailable, do NOT treat it as a missing file.
+                if (e.getStatusCode() != org.springframework.http.HttpStatus.NOT_FOUND) {
+                    throw e;
+                }
+            }
+        }
         try {
             Path filePath = this.fileStorageLocation.resolve(fileName).normalize();
             if (!filePath.startsWith(this.fileStorageLocation) || !Files.isRegularFile(filePath)) {
