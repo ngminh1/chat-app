@@ -21,11 +21,16 @@ import java.util.UUID;
 
 @Service
 public class FileStorageService {
+    private static final long MAX_UPLOAD_BYTES = 25L * 1024 * 1024;
 
     private final Path fileStorageLocation;
 
     public FileStorageService() {
-        this.fileStorageLocation = Paths.get("uploads").toAbsolutePath().normalize();
+        this(Paths.get("uploads"));
+    }
+
+    FileStorageService(Path storageDirectory) {
+        this.fileStorageLocation = storageDirectory.toAbsolutePath().normalize();
         try {
             Files.createDirectories(this.fileStorageLocation);
         } catch (Exception ex) {
@@ -35,6 +40,18 @@ public class FileStorageService {
 
     public FileUploadResponse storeFile(MultipartFile file, boolean avatar, Long conversationId, String expectedSha256) {
         String originalFileName = StringUtils.cleanPath(Objects.requireNonNull(file.getOriginalFilename()));
+        if (file.isEmpty()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "Tệp rỗng");
+        }
+        if (file.getSize() > MAX_UPLOAD_BYTES) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.PAYLOAD_TOO_LARGE, "Tệp vượt giới hạn 25 MB");
+        }
+        if (!avatar && (expectedSha256 == null || !expectedSha256.matches("(?i)[0-9a-f]{64}"))) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "Thiếu SHA-256 hợp lệ");
+        }
 
         try {
             if (originalFileName.contains("..")) {
@@ -67,7 +84,7 @@ public class FileStorageService {
             try (InputStream savedFile = Files.newInputStream(targetLocation)) {
                 actualSha256 = SHA256.hashStream(savedFile);
             }
-            if (!avatar && expectedSha256 != null) {
+            if (!avatar) {
                 if (!expectedSha256.matches("(?i)[0-9a-f]{64}") ||
                         !MessageDigest.isEqual(
                                 actualSha256.getBytes(StandardCharsets.US_ASCII),
