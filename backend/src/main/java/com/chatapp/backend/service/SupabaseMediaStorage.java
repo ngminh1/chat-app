@@ -78,7 +78,7 @@ public class SupabaseMediaStorage {
         requireSafeName(fileName);
         try {
             HttpResponse<byte[]> response = client.send(
-                    authenticatedRequest(fileName).timeout(Duration.ofSeconds(90)).GET().build(),
+                    authenticatedRequest(fileName, true).timeout(Duration.ofSeconds(90)).GET().build(),
                     HttpResponse.BodyHandlers.ofByteArray());
             if (response.statusCode() == 404) {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Media not present on Supabase");
@@ -100,7 +100,12 @@ public class SupabaseMediaStorage {
     }
 
     private HttpRequest.Builder authenticatedRequest(String fileName) {
-        String resource = baseUrl + "/storage/v1/object/" + bucket + "/" + KEY_PREFIX + fileName;
+        return authenticatedRequest(fileName, false);
+    }
+
+    private HttpRequest.Builder authenticatedRequest(String fileName, boolean download) {
+        String resource = baseUrl + "/storage/v1/object/"
+                + (download ? "authenticated/" : "") + bucket + "/" + KEY_PREFIX + fileName;
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(resource))
                 .header("apikey", secretKey);
         // Legacy service_role key is a JWT. The new sb_secret_ key is not a JWT.
