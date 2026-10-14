@@ -13,8 +13,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.core.io.ByteArrayResource;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.*;
-import static org.mockito.ArgumentMatchers.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -157,7 +161,7 @@ class FileStorageSha256ValidationTest {
         var file = new MockMultipartFile("file", "large.bin", "application/octet-stream", bytes);
         var error = assertThrows(ResponseStatusException.class,
                 () -> storage.storeFile(file, false, 1L, "a".repeat(64)));
-        assertEquals(HttpStatus.PAYLOAD_TOO_LARGE, error.getStatusCode());
+        assertEquals(HttpStatus.CONTENT_TOO_LARGE, error.getStatusCode());
     }
 
     @Test

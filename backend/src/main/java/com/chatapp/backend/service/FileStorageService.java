@@ -55,7 +55,7 @@ public class FileStorageService {
         }
         if (file.getSize() > MAX_UPLOAD_BYTES) {
             throw new org.springframework.web.server.ResponseStatusException(
-                    org.springframework.http.HttpStatus.PAYLOAD_TOO_LARGE, "Tệp vượt giới hạn 25 MB");
+                    org.springframework.http.HttpStatus.CONTENT_TOO_LARGE, "Tệp vượt giới hạn 25 MB");
         }
         if (!avatar && (expectedSha256 == null || !expectedSha256.matches("(?i)[0-9a-f]{64}"))) {
             throw new org.springframework.web.server.ResponseStatusException(
