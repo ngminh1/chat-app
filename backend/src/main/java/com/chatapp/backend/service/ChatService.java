@@ -1,16 +1,12 @@
-
 package com.chatapp.backend.service;
 
 import com.chatapp.backend.dto.*;
 import com.chatapp.backend.entity.*;
 import com.chatapp.backend.repository.*;
-import com.chatapp.backend.util.SHA;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.security.SecureRandom;
@@ -18,7 +14,6 @@ import java.util.Base64;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -36,12 +31,8 @@ public class ChatService {
     private final SimpMessagingTemplate messagingTemplate;
 
     /**
-     * MIGRATION ONLY: lấy raw AES key khi conversation chưa có wrapped key ElGamal.
-     *
-     * Luồng mới sẽ lập tức bọc key này bằng public key ElGamal của từng thành viên và
-     * xóa raw key khỏi Conversation khi tất cả thành viên đã có wrapped key.
-     * Nếu conversation đã migrate thì TUYỆT ĐỐI không sinh key mới, vì sinh key mới
-     * sẽ làm toàn bộ ciphertext cũ không thể giải mã.
+     * DEV ONLY: trả cùng một raw AES-256 key cho mọi thành viên của conversation.
+     * Backend biết key nên đây chỉ là cơ chế demo AES, CHƯA PHẢI E2EE.
      */
     public synchronized AesKeyResponse getOrCreateConversationAesKey(Long conversationId, Long userId) {
         Conversation conversation = conversationRepository.findById(conversationId)
@@ -51,12 +42,6 @@ public class ChatService {
                 .orElseThrow(() -> new RuntimeException("Bạn không phải thành viên của cuộc trò chuyện này"));
 
         if (conversation.getAesKey() == null || conversation.getAesKey().isBlank()) {
-            List<ConversationMember> members = conversationMemberRepository.findByConversationId(conversationId);
-            boolean alreadyMigrated = members.stream().anyMatch(this::hasWrappedKey);
-            if (alreadyMigrated) {
-                throw new RuntimeException("Conversation đã dùng ElGamal wrapped key; không được sinh raw AES key mới");
-            }
-
             byte[] rawKey = new byte[32]; // 256 bit
             new SecureRandom().nextBytes(rawKey);
             conversation.setAesKey(Base64.getEncoder().encodeToString(rawKey));
@@ -67,104 +52,6 @@ public class ChatService {
                 .conversationId(conversationId)
                 .key(conversation.getAesKey())
                 .build();
-    }
-
-    public List<CryptoMemberResponse> getConversationCryptoMembers(Long conversationId, Long requesterId) {
-        conversationMemberRepository.findByConversationIdAndUserId(conversationId, requesterId)
-                .orElseThrow(() -> new RuntimeException("Bạn không phải thành viên của cuộc trò chuyện này"));
-
-        return conversationMemberRepository.findByConversationId(conversationId).stream()
-                .map(member -> CryptoMemberResponse.builder()
-                        .userId(member.getUser().getId())
-                        .publicKey(member.getUser().getElgamalPublicKey())
-                        .keyVersion(member.getUser().getElgamalKeyVersion() != null
-                                ? member.getUser().getElgamalKeyVersion()
-                                : 1)
-                        .hasWrappedKey(hasWrappedKey(member))
-                        .build())
-                .collect(Collectors.toList());
-    }
-
-    public WrappedKeyResponse getConversationWrappedKey(Long conversationId, Long userId) {
-        ConversationMember member = conversationMemberRepository
-                .findByConversationIdAndUserId(conversationId, userId)
-                .orElseThrow(() -> new RuntimeException("Bạn không phải thành viên của cuộc trò chuyện này"));
-
-        if (!hasWrappedKey(member)) {
-            return null;
-        }
-
-        return WrappedKeyResponse.builder()
-                .conversationId(conversationId)
-                .userId(userId)
-                .c1(member.getEncryptedAesKeyC1())
-                .c2(member.getEncryptedAesKeyC2())
-                .keyVersion(member.getWrappedKeyVersion() != null ? member.getWrappedKeyVersion() : 1)
-                .build();
-    }
-
-    public void saveConversationWrappedKeys(
-            Long conversationId,
-            Long requesterId,
-            WrappedKeyBatchRequest request) {
-        Conversation conversation = conversationRepository.findById(conversationId)
-                .orElseThrow(() -> new RuntimeException("Cuộc trò chuyện không tồn tại"));
-
-        conversationMemberRepository.findByConversationIdAndUserId(conversationId, requesterId)
-                .orElseThrow(() -> new RuntimeException("Bạn không phải thành viên của cuộc trò chuyện này"));
-
-        if (request == null || request.getKeys() == null || request.getKeys().isEmpty()) {
-            throw new RuntimeException("Danh sách wrapped key rỗng");
-        }
-
-        for (WrappedKeyItem item : request.getKeys()) {
-            if (item.getUserId() == null
-                    || item.getC1() == null || !item.getC1().matches("\\d+")
-                    || item.getC2() == null || !item.getC2().matches("\\d+")) {
-                throw new RuntimeException("Wrapped key ElGamal không hợp lệ");
-            }
-
-            ConversationMember target = conversationMemberRepository
-                    .findByConversationIdAndUserId(conversationId, item.getUserId())
-                    .orElseThrow(() -> new RuntimeException("Wrapped key chứa user không thuộc conversation"));
-
-            // Sau khi raw AES key đã bị xóa, không cho batch migration ghi đè wrapped key đã có.
-            // Điều này tránh một member làm hỏng lịch sử của member khác bằng c1/c2 giả.
-            if (hasWrappedKey(target)
-                    && (conversation.getAesKey() == null || conversation.getAesKey().isBlank())) {
-                continue;
-            }
-
-            int targetKeyVersion = target.getUser().getElgamalKeyVersion() != null
-                    ? target.getUser().getElgamalKeyVersion()
-                    : 1;
-            int suppliedKeyVersion = item.getKeyVersion() != null ? item.getKeyVersion() : 1;
-            if (suppliedKeyVersion != targetKeyVersion) {
-                throw new RuntimeException("Wrapped key version không khớp public key của user");
-            }
-
-            target.setEncryptedAesKeyC1(item.getC1());
-            target.setEncryptedAesKeyC2(item.getC2());
-            target.setWrappedKeyVersion(suppliedKeyVersion);
-            conversationMemberRepository.save(target);
-        }
-
-        clearLegacyAesKeyIfFullyWrapped(conversation);
-    }
-
-    private boolean hasWrappedKey(ConversationMember member) {
-        return member.getEncryptedAesKeyC1() != null
-                && !member.getEncryptedAesKeyC1().isBlank()
-                && member.getEncryptedAesKeyC2() != null
-                && !member.getEncryptedAesKeyC2().isBlank();
-    }
-
-    private void clearLegacyAesKeyIfFullyWrapped(Conversation conversation) {
-        List<ConversationMember> members = conversationMemberRepository.findByConversationId(conversation.getId());
-        if (!members.isEmpty() && members.stream().allMatch(this::hasWrappedKey)) {
-            conversation.setAesKey(null);
-            conversationRepository.save(conversation);
-        }
     }
 
     public void updateUserPresence(Long userId, boolean isOnline) {
@@ -274,11 +161,7 @@ public class ChatService {
         return savedGroup;
     }
 
-    public void addGroupMember(
-            Long conversationId,
-            Long currentUserId,
-            Long targetUserId,
-            WrappedKeyItem wrappedKey) {
+    public void addGroupMember(Long conversationId, Long currentUserId, Long targetUserId) {
         Conversation conv = getGroupConversation(conversationId);
         validateGroupMembership(conv.getId(), currentUserId);
 
@@ -292,44 +175,13 @@ public class ChatService {
         User currentUser = userRepository.findById(currentUserId)
                 .orElseThrow(() -> new RuntimeException("User hiện tại không tồn tại"));
 
-        boolean conversationAlreadyMigrated = conv.getAesKey() == null
-                && conversationMemberRepository.findByConversationId(conv.getId()).stream().anyMatch(this::hasWrappedKey);
-
-        if (conversationAlreadyMigrated
-                && (wrappedKey == null || wrappedKey.getC1() == null || wrappedKey.getC2() == null)) {
-            throw new RuntimeException("Conversation đã dùng ElGamal. Cần wrapped AES key cho thành viên mới.");
-        }
-
-        if (wrappedKey != null) {
-            if (wrappedKey.getUserId() != null && !targetUserId.equals(wrappedKey.getUserId())) {
-                throw new RuntimeException("Wrapped key không thuộc thành viên đang được thêm");
-            }
-            if (wrappedKey.getC1() == null || !wrappedKey.getC1().matches("\\d+")
-                    || wrappedKey.getC2() == null || !wrappedKey.getC2().matches("\\d+")) {
-                throw new RuntimeException("Wrapped key ElGamal không hợp lệ");
-            }
-            int targetKeyVersion = targetUser.getElgamalKeyVersion() != null
-                    ? targetUser.getElgamalKeyVersion()
-                    : 1;
-            int suppliedKeyVersion = wrappedKey.getKeyVersion() != null ? wrappedKey.getKeyVersion() : 1;
-            if (suppliedKeyVersion != targetKeyVersion) {
-                throw new RuntimeException("Wrapped key version không khớp public key của thành viên mới");
-            }
-        }
-
         ConversationMember newMember = ConversationMember.builder()
                 .conversation(conv)
                 .user(targetUser)
                 .role(MemberRole.MEMBER)
                 .lastReadAt(LocalDateTime.now())
-                .encryptedAesKeyC1(wrappedKey != null ? wrappedKey.getC1() : null)
-                .encryptedAesKeyC2(wrappedKey != null ? wrappedKey.getC2() : null)
-                .wrappedKeyVersion(wrappedKey != null && wrappedKey.getKeyVersion() != null
-                        ? wrappedKey.getKeyVersion()
-                        : null)
                 .build();
         conversationMemberRepository.save(newMember);
-        clearLegacyAesKeyIfFullyWrapped(conv);
 
         sendSystemMessage(conv, currentUser, currentUser.getDisplayName() + " đã thêm " + targetUser.getDisplayName() + " vào nhóm");
     }
@@ -350,7 +202,6 @@ public class ChatService {
         User currentUser = currentMember.getUser();
 
         conversationMemberRepository.delete(targetMember);
-        notifyMembershipChangeAfterCommit(conv.getId(), targetUserId);
         sendSystemMessage(conv, currentUser, currentUser.getDisplayName() + " đã xóa " + targetUser.getDisplayName() + " khỏi nhóm");
     }
 
@@ -361,7 +212,6 @@ public class ChatService {
 
         User user = member.getUser();
         conversationMemberRepository.delete(member);
-        notifyMembershipChangeAfterCommit(conv.getId(), userId);
 
         List<ConversationMember> remainingMembers = conversationMemberRepository.findByConversationId(conv.getId());
         if (remainingMembers.isEmpty()) {
@@ -420,41 +270,19 @@ public class ChatService {
         Conversation conversation = conversationRepository.findById(request.getConversationId())
                 .orElseThrow(() -> new RuntimeException("Cuộc trò chuyện không tồn tại"));
 
-        // Không bao giờ cho phép một tài khoản gửi vào hội thoại không tham gia.
-        requireConversationMember(conversation.getId(), request.getSenderId());
         User sender = userRepository.findById(request.getSenderId())
                 .orElseThrow(() -> new RuntimeException("Người gửi không tồn tại"));
 
         Message replyToMessage = null;
         if (request.getReplyToId() != null) {
             replyToMessage = messageRepository.findById(request.getReplyToId()).orElse(null);
-            if (replyToMessage != null && !replyToMessage.getConversation().getId().equals(conversation.getId())) {
-                throw new IllegalArgumentException("Không được reply tin nhắn từ hội thoại khác");
-            }
         }
 
         MessageType type = request.getMessageType() != null ? request.getMessageType() : MessageType.TEXT;
-        if (type == MessageType.SYSTEM) {
-            throw new IllegalArgumentException("Chỉ backend mới được tạo thông báo SYSTEM");
-        }
 
         boolean encryptedText = type == MessageType.TEXT
                 && request.getCiphertext() != null && !request.getCiphertext().isBlank()
                 && request.getIv() != null && !request.getIv().isBlank();
-
-        // Hệ thống SYSTEM do service tạo riêng; TEXT gửi từ API phải là AES-GCM.
-        if (type == MessageType.TEXT && !encryptedText) {
-            throw new IllegalArgumentException("Tin nhắn TEXT phải được mã hóa AES-GCM");
-        }
-
-        if (encryptedText) {
-            validateEncryptedPayload(
-                    request.getCiphertext(),
-                    request.getIv(),
-                    request.getEncryptionVersion(),
-                    request.getSha256()
-            );
-        }
 
         Message message = Message.builder()
                 .conversation(conversation)
@@ -466,7 +294,6 @@ public class ChatService {
                 .encryptionVersion(encryptedText
                         ? (request.getEncryptionVersion() != null ? request.getEncryptionVersion() : "AES-256-GCM")
                         : null)
-                .sha256(encryptedText ? request.getSha256().toLowerCase() : null)
                 .messageType(type)
                 .mediaUrl(request.getMediaUrl())
                 .fileName(request.getFileName())
@@ -502,10 +329,6 @@ public class ChatService {
     public List<MessageResponse> forwardMessage(ForwardMessageRequest request) {
         Message originalMessage = messageRepository.findById(request.getMessageId())
                 .orElseThrow(() -> new RuntimeException("Tin nhắn không tồn tại"));
-
-        if (originalMessage.getMessageType() == MessageType.TEXT) {
-            throw new IllegalArgumentException("Chuyển tiếp TEXT phải mã hóa lại bằng khóa của hội thoại đích ở client");
-        }
 
         if (Boolean.TRUE.equals(originalMessage.getIsDeleted())) {
             throw new RuntimeException("Không thể chuyển tiếp tin nhắn đã bị thu hồi");
@@ -596,44 +419,6 @@ public class ChatService {
                 .collect(Collectors.toList());
     }
 
-    private void notifyMembershipChangeAfterCommit(Long conversationId, Long removedUserId) {
-        List<Long> remainingIds = conversationMemberRepository
-                .findByConversationId(conversationId)
-                .stream()
-                .map(m -> m.getUser().getId())
-                .filter(id -> !id.equals(removedUserId))
-                .toList();
-
-        TransactionSynchronizationManager.registerSynchronization(
-                new TransactionSynchronization() {
-                    @Override
-                    public void afterCommit() {
-                        Map<String, Object> removedEvent = Map.of(
-                                "event", "GROUP_REMOVED",
-                                "conversationId", conversationId
-                        );
-
-                        messagingTemplate.convertAndSend(
-                                "/topic/users/" + removedUserId + "/messages",
-                                (Object) removedEvent
-                        );
-
-                        Map<String, Object> changedEvent = Map.of(
-                                "event", "GROUP_MEMBERS_CHANGED",
-                                "conversationId", conversationId
-                        );
-
-                        for (Long id : remainingIds) {
-                            messagingTemplate.convertAndSend(
-                                    "/topic/users/" + id + "/messages",
-                                    (Object) changedEvent
-                            );
-                        }
-                    }
-                }
-        );
-    }
-
     private void sendSystemMessage(Conversation conv, User sender, String content) {
         Message systemMsg = Message.builder()
                 .conversation(conv)
@@ -664,12 +449,6 @@ public class ChatService {
         return conv;
     }
 
-    private void requireConversationMember(Long convId, Long userId) {
-        conversationMemberRepository.findByConversationIdAndUserId(convId, userId)
-                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
-                        org.springframework.http.HttpStatus.FORBIDDEN, "Không thuộc hội thoại"));
-    }
-
     private void validateGroupMembership(Long convId, Long userId) {
         conversationMemberRepository.findByConversationIdAndUserId(convId, userId)
                 .orElseThrow(() -> new RuntimeException("Bạn không phải là thành viên trong nhóm này"));
@@ -679,9 +458,6 @@ public class ChatService {
         Message message = messageRepository.findById(request.getMessageId())
                 .orElseThrow(() -> new RuntimeException("Tin nhắn không tồn tại"));
 
-        if (message.getMessageType() != MessageType.TEXT) {
-            throw new IllegalArgumentException("Chỉ chỉnh sửa tin nhắn TEXT");
-        }
         if (!message.getSender().getId().equals(request.getSenderId())) {
             throw new RuntimeException("Bạn chỉ có thể chỉnh sửa tin nhắn của chính mình");
         }
@@ -693,18 +469,20 @@ public class ChatService {
         boolean encryptedEdit = request.getCiphertext() != null && !request.getCiphertext().isBlank()
                 && request.getIv() != null && !request.getIv().isBlank();
 
-        if (!encryptedEdit) {
-            throw new IllegalArgumentException("Nội dung chỉnh sửa phải được mã hóa AES-GCM");
+        if (encryptedEdit) {
+            message.setContent(null);
+            message.setCiphertext(request.getCiphertext());
+            message.setIv(request.getIv());
+            message.setEncryptionVersion(
+                    request.getEncryptionVersion() != null ? request.getEncryptionVersion() : "AES-256-GCM"
+            );
+        } else {
+            // Backward compatibility cho message legacy/plaintext.
+            message.setContent(request.getContent());
+            message.setCiphertext(null);
+            message.setIv(null);
+            message.setEncryptionVersion(null);
         }
-        validateEncryptedPayload(
-                request.getCiphertext(), request.getIv(),
-                request.getEncryptionVersion(), request.getSha256()
-        );
-        message.setContent(null);
-        message.setCiphertext(request.getCiphertext());
-        message.setIv(request.getIv());
-        message.setEncryptionVersion("AES-256-GCM");
-        message.setSha256(request.getSha256().toLowerCase());
         message.setIsEdited(true);
         Message saved = messageRepository.save(message);
 
@@ -727,7 +505,6 @@ public class ChatService {
         message.setCiphertext(null);
         message.setIv(null);
         message.setEncryptionVersion(null);
-        message.setSha256(null);
         message.setMediaUrl(null);
         message.setFileName(null);
         message.setFileSize(null);
@@ -841,7 +618,6 @@ public class ChatService {
             String lastMessageCiphertext = null;
             String lastMessageIv = null;
             String lastMessageEncryptionVersion = null;
-            String lastMessageSha256 = null;
             String lastMessageSenderName = null;
             LocalDateTime lastMessageTime = conv.getCreatedAt() != null ? conv.getCreatedAt() : LocalDateTime.now();
 
@@ -865,7 +641,6 @@ public class ChatService {
                     lastMessageCiphertext = latest.getCiphertext();
                     lastMessageIv = latest.getIv();
                     lastMessageEncryptionVersion = latest.getEncryptionVersion();
-                    lastMessageSha256 = latest.getSha256();
                     lastMessageSenderName = latest.getSender() != null ? latest.getSender().getDisplayName() : null;
                 } else if (latest.getContent() != null && !latest.getContent().trim().isEmpty()) {
                     lastMessage = senderPrefix + latest.getContent();
@@ -902,7 +677,6 @@ public class ChatService {
                     .lastMessageCiphertext(lastMessageCiphertext)
                     .lastMessageIv(lastMessageIv)
                     .lastMessageEncryptionVersion(lastMessageEncryptionVersion)
-                    .lastMessageSha256(lastMessageSha256)
                     .lastMessageSenderName(lastMessageSenderName)
                     .lastMessageTime(lastMessageTime)
                     .unreadCount(unreadCount)
@@ -919,20 +693,6 @@ public class ChatService {
         return responses;
     }
 
-    private void validateEncryptedPayload(String ciphertext, String iv, String encryptionVersion, String sha256) {
-        if (sha256 == null || !sha256.matches("(?i)^[0-9a-f]{64}$")) {
-            throw new RuntimeException("Thiếu hoặc sai định dạng SHA-256 của encrypted payload");
-        }
-
-        String version = (encryptionVersion == null || encryptionVersion.isBlank())
-                ? "AES-256-GCM"
-                : encryptionVersion;
-
-        if (!SHA.verifyEncryptedPayload(ciphertext, iv, version, sha256)) {
-            throw new RuntimeException("SHA-256 không khớp: encrypted payload có thể đã bị thay đổi");
-        }
-    }
-
     private MessageResponse mapToMessageResponse(Message msg) {
         ReplyPreviewResponse replyPreview = null;
         if (msg.getReplyTo() != null) {
@@ -941,7 +701,6 @@ public class ChatService {
             String replyCiphertext = null;
             String replyIv = null;
             String replyEncryptionVersion = null;
-            String replySha256 = null;
 
             if (Boolean.TRUE.equals(reply.getIsDeleted())) {
                 replyContent = "Tin nhắn đã bị thu hồi";
@@ -955,7 +714,6 @@ public class ChatService {
                 replyCiphertext = reply.getCiphertext();
                 replyIv = reply.getIv();
                 replyEncryptionVersion = reply.getEncryptionVersion();
-                replySha256 = reply.getSha256();
             } else if (reply.getContent() != null) {
                 replyContent = reply.getContent();
             }
@@ -971,7 +729,6 @@ public class ChatService {
                     .ciphertext(replyCiphertext)
                     .iv(replyIv)
                     .encryptionVersion(replyEncryptionVersion)
-                    .sha256(replySha256)
                     .build();
         }
 
@@ -996,7 +753,6 @@ public class ChatService {
                 .ciphertext(msg.getCiphertext())
                 .iv(msg.getIv())
                 .encryptionVersion(msg.getEncryptionVersion())
-                .sha256(msg.getSha256())
                 .messageType(msg.getMessageType())
                 .mediaUrl(msg.getMediaUrl())
                 .fileName(msg.getFileName())

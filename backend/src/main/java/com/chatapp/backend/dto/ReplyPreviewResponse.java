@@ -16,5 +16,4 @@ public class ReplyPreviewResponse {
     private String ciphertext;
     private String iv;
     private String encryptionVersion;
-    private String sha256;
 }

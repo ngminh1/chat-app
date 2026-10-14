@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { X, MessageSquare } from 'lucide-react';
 
 export default function ToastNotification({ toast, onClose, onSelectConversation }) {

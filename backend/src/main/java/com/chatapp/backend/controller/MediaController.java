@@ -13,6 +13,7 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequestMapping("/api/media")
 @RequiredArgsConstructor
+@CrossOrigin(origins = "*")
 public class MediaController {
 
     private final FileStorageService fileStorageService;

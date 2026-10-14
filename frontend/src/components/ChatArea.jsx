@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import {
   Send,
@@ -28,35 +27,19 @@ import {
   ArrowDown,
   Clock
 } from 'lucide-react';
-
-import {
-  formatMessageTime,
-  formatSidebarTime,
-  formatDateDivider,
-  isSameDay
-} from '../utils/formatTime';
+import { formatMessageTime, formatSidebarTime, formatDateDivider, isSameDay } from '../utils/formatTime';
 import { CHAT_THEMES } from '../utils/themeConfig';
 import { ChatTimelineSkeleton } from './Skeletons';
 import { API_BASE } from '../config/api';
 
 const REACTION_LIST = ['👍', '❤️', '😂', '😮', '😢', '😡'];
-const MAX_FILE_SIZE = 25 * 1024 * 1024;
+const MAX_FILE_SIZE = 25 * 1024 * 1024; // Giới hạn 25MB
 
-// Đổi hội thoại sẽ khởi tạo một khung chat mới,
-// tránh lưu state nhập liệu / file của hội thoại trước.
-export default function ChatArea(props) {
-  return (
-    <ChatAreaContent
-      key={props.activeConversation?.conversationId}
-      {...props}
-    />
-  );
-}
-
-function ChatAreaContent({
+export default function ChatArea({
   activeConversation,
   messages,
   currentUserId,
+  currentUserName,
   onSendMessage,
   onEditMessage,
   onDeleteMessage,
@@ -90,8 +73,11 @@ function ChatAreaContent({
 
   const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
   const [currentSearchIndex, setCurrentSearchIndex] = useState(0);
+  const [isSearchingLoading, setIsSearchingLoading] = useState(false);
   const [highlightedMsgId, setHighlightedMsgId] = useState(null);
+
   const [showScrollBottom, setShowScrollBottom] = useState(false);
 
   const messagesContainerRef = useRef(null);
@@ -100,21 +86,12 @@ function ChatAreaContent({
   const imageInputRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  const currentTheme =
-    CHAT_THEMES[activeConversation?.theme] || CHAT_THEMES.blue;
+  const currentTheme = CHAT_THEMES[activeConversation?.theme] || CHAT_THEMES.blue;
 
   const handleScroll = () => {
     if (!messagesContainerRef.current) return;
-
-    const {
-      scrollTop,
-      scrollHeight,
-      clientHeight
-    } = messagesContainerRef.current;
-
-    const distanceFromBottom =
-      scrollHeight - scrollTop - clientHeight;
-
+    const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
     setShowScrollBottom(distanceFromBottom > 240);
   };
 
@@ -122,112 +99,76 @@ function ChatAreaContent({
     messagesEndRef.current?.scrollIntoView({ behavior });
   };
 
-  // Tự cuộn khi có tin nhắn mới nếu người dùng đang ở cuối.
   useEffect(() => {
     if (!highlightedMsgId && !showScrollBottom) {
-      messagesEndRef.current?.scrollIntoView({
-        behavior: 'smooth'
-      });
+      scrollToBottom('smooth');
     }
-  }, [
-    messages,
-    typingUser,
-    selectedFile,
-    highlightedMsgId,
-    showScrollBottom
-  ]);
+  }, [messages, typingUser, selectedFile]);
 
-  // Giải phóng URL tạm khi thay ảnh hoặc đóng hội thoại.
   useEffect(() => {
-    return () => {
-      if (filePreviewUrl) {
-        URL.revokeObjectURL(filePreviewUrl);
-      }
-    };
-  }, [filePreviewUrl]);
+    scrollToBottom('auto');
+    setSendErrorMessage('');
+    setReplyingTo(null);
+    setEditingMessage(null);
+    removeSelectedFile();
+  }, [activeConversation?.conversationId]);
 
-  // Tìm trên plaintext đã được giải mã bởi App.
-  const searchResults = useMemo(() => {
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      setIsSearchingLoading(false);
+      return;
+    }
+
+    // Message AES đã được App decrypt trước khi truyền vào ChatArea.
+    // Vì backend chỉ có ciphertext nên search TEXT mã hóa phải làm trên plaintext phía client.
     const query = searchQuery.trim().toLowerCase();
-
-    if (!query) return [];
-
-    return messages.filter(
-      (msg) =>
-        !msg.isDeleted &&
-        typeof msg.content === 'string' &&
-        msg.content.toLowerCase().includes(query)
+    const results = messages.filter((msg) =>
+      !msg.isDeleted &&
+      typeof msg.content === 'string' &&
+      msg.content.toLowerCase().includes(query)
     );
-  }, [searchQuery, messages]);
+
+    setSearchResults(results);
+    setCurrentSearchIndex(0);
+    setIsSearchingLoading(false);
+
+    if (results.length > 0) {
+      setTimeout(() => jumpToMessageId(results[0].id), 0);
+    }
+  }, [searchQuery, activeConversation?.conversationId, messages]);
 
   const jumpToMessageId = (msgId) => {
     setHighlightedMsgId(msgId);
-
     const element = document.getElementById(`msg-${msgId}`);
-
     if (element) {
-      element.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center'
-      });
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-
     setTimeout(() => {
       setHighlightedMsgId(null);
     }, 2500);
   };
 
-  const handleSearchChange = (e) => {
-    const query = e.target.value;
-    const normalizedQuery = query.trim().toLowerCase();
-
-    setSearchQuery(query);
-    setCurrentSearchIndex(0);
-
-    if (!normalizedQuery) return;
-
-    const first = messages.find(
-      (msg) =>
-        !msg.isDeleted &&
-        typeof msg.content === 'string' &&
-        msg.content.toLowerCase().includes(normalizedQuery)
-    );
-
-    if (first) {
-      jumpToMessageId(first.id);
-    }
-  };
-
   const handleNextSearch = () => {
     if (searchResults.length === 0) return;
-
-    const nextIndex =
-      (currentSearchIndex + 1) % searchResults.length;
-
+    const nextIndex = (currentSearchIndex + 1) % searchResults.length;
     setCurrentSearchIndex(nextIndex);
     jumpToMessageId(searchResults[nextIndex].id);
   };
 
   const handlePrevSearch = () => {
     if (searchResults.length === 0) return;
-
-    const prevIndex =
-      (currentSearchIndex - 1 + searchResults.length) %
-      searchResults.length;
-
+    const prevIndex = (currentSearchIndex - 1 + searchResults.length) % searchResults.length;
     setCurrentSearchIndex(prevIndex);
     jumpToMessageId(searchResults[prevIndex].id);
   };
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
-
     if (!file) return;
 
     if (file.size > MAX_FILE_SIZE) {
-      setSendErrorMessage(
-        'Tệp tin quá lớn! Dung lượng tối đa cho phép là 25MB.'
-      );
+      setSendErrorMessage("Tệp tin quá lớn! Dung lượng tối đa cho phép là 25MB.");
       e.target.value = '';
       return;
     }
@@ -235,47 +176,36 @@ function ChatAreaContent({
     setSelectedFile(file);
     setUploadPercent(0);
     setSendErrorMessage('');
-
     if (file.type.startsWith('image/')) {
       setFilePreviewUrl(URL.createObjectURL(file));
     } else {
       setFilePreviewUrl(null);
     }
-
     e.target.value = '';
   };
 
   const handlePaste = (e) => {
     const clipboardItems = e.clipboardData?.items;
-
     if (!clipboardItems) return;
 
     for (let i = 0; i < clipboardItems.length; i++) {
       const item = clipboardItems[i];
-
       if (item.kind === 'file') {
         const file = item.getAsFile();
-
         if (file) {
           if (file.size > MAX_FILE_SIZE) {
-            setSendErrorMessage(
-              'Tệp tin dán quá lớn! Dung lượng tối đa là 25MB.'
-            );
+            setSendErrorMessage("Tệp tin dán quá lớn! Dung lượng tối đa là 25MB.");
             return;
           }
-
           e.preventDefault();
-
           setSelectedFile(file);
           setUploadPercent(0);
           setSendErrorMessage('');
-
           if (file.type.startsWith('image/')) {
             setFilePreviewUrl(URL.createObjectURL(file));
           } else {
             setFilePreviewUrl(null);
           }
-
           break;
         }
       }
@@ -285,7 +215,6 @@ function ChatAreaContent({
   const removeSelectedFile = () => {
     setSelectedFile(null);
     setUploadPercent(0);
-
     if (filePreviewUrl) {
       URL.revokeObjectURL(filePreviewUrl);
       setFilePreviewUrl(null);
@@ -294,86 +223,53 @@ function ChatAreaContent({
 
   const formatFileSize = (bytes) => {
     if (!bytes) return '0 B';
-
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-
-    return (
-      parseFloat((bytes / Math.pow(k, i)).toFixed(1)) +
-      ' ' +
-      sizes[i]
-    );
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
   const handleSubmit = async (e) => {
     if (e) e.preventDefault();
+    if ((!inputText.trim() && !selectedFile) || isSending || isUploading) return;
 
-    if (
-      (!inputText.trim() && !selectedFile) ||
-      isSending ||
-      isUploading
-    ) {
-      return;
-    }
-
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
-
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     onSendTyping(false);
+
     setSendErrorMessage('');
 
     if (editingMessage) {
       setIsSending(true);
-
       try {
         await onEditMessage(editingMessage.id, inputText.trim());
         setEditingMessage(null);
         setInputText('');
-      } catch {
-        setSendErrorMessage('Không thể chỉnh sửa tin nhắn.');
+      } catch (err) {
+        setSendErrorMessage("Không thể chỉnh sửa tin nhắn.");
       } finally {
         setIsSending(false);
       }
-
       return;
     }
 
     if (selectedFile) {
       setIsUploading(true);
       setUploadPercent(0);
-
       try {
         const formData = new FormData();
         formData.append('file', selectedFile);
 
-        const uploadRes = await axios.post(
-          `${API_BASE}/media/upload`,
-          formData,
-          {
-            headers: {
-              'Content-Type': 'multipart/form-data'
-            },
-            onUploadProgress: (progressEvent) => {
-              if (progressEvent.total) {
-                const percent = Math.round(
-                  (progressEvent.loaded * 100) /
-                  progressEvent.total
-                );
-
-                setUploadPercent(percent);
-              }
+        const uploadRes = await axios.post(`${API_BASE}/media/upload`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          onUploadProgress: (progressEvent) => {
+            if (progressEvent.total) {
+              const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+              setUploadPercent(percent);
             }
           }
-        );
+        });
 
-        const {
-          fileUrl,
-          fileName,
-          fileSize,
-          messageType
-        } = uploadRes.data;
+        const { fileUrl, fileName, fileSize, messageType } = uploadRes.data;
 
         await onSendMessage(
           inputText.trim(),
@@ -389,40 +285,27 @@ function ChatAreaContent({
         setReplyingTo(null);
         scrollToBottom('smooth');
       } catch (err) {
-        console.error('Lỗi gửi file:', err);
-        setSendErrorMessage(
-          'Không thể tải lên hoặc gửi tệp tin.'
-        );
+        console.error("Lỗi gửi file:", err);
+        setSendErrorMessage("Không thể tải lên hoặc gửi tệp tin.");
       } finally {
         setIsUploading(false);
         setUploadPercent(0);
       }
-
       return;
     }
 
-    // Gửi TEXT qua handler mã hóa AES-256-GCM ở App.
+    // Gửi tin nhắn Text với Optimistic UI
     setIsSending(true);
-
     try {
       const text = inputText.trim();
       const replyId = replyingTo?.id;
-
       setInputText('');
       setReplyingTo(null);
       scrollToBottom('smooth');
-
-      await onSendMessage(
-        text,
-        replyId,
-        'TEXT',
-        null,
-        null,
-        null
-      );
+      await onSendMessage(text, replyId, 'TEXT', null, null, null);
     } catch (err) {
-      console.error('Lỗi gửi tin nhắn:', err);
-      setSendErrorMessage('Không thể gửi tin nhắn.');
+      console.error("Lỗi gửi tin nhắn:", err);
+      setSendErrorMessage("Không thể gửi tin nhắn.");
     } finally {
       setIsSending(false);
     }
@@ -430,51 +313,30 @@ function ChatAreaContent({
 
   const handleInputChange = (e) => {
     const value = e.target.value;
-
     setInputText(value);
-
-    if (sendErrorMessage) {
-      setSendErrorMessage('');
-    }
+    if (sendErrorMessage) setSendErrorMessage('');
 
     if (value.trim().length > 0) {
       onSendTyping(true);
-
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-      }
-
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = setTimeout(() => {
         onSendTyping(false);
       }, 2000);
     } else {
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-      }
-
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       onSendTyping(false);
     }
   };
 
   const handleSendLike = async () => {
     if (isSending) return;
-
     setIsSending(true);
     setSendErrorMessage('');
-
     try {
-      await onSendMessage(
-        '👍',
-        null,
-        'TEXT',
-        null,
-        null,
-        null
-      );
-
+      await onSendMessage('👍', null, 'TEXT', null, null, null);
       scrollToBottom('smooth');
-    } catch {
-      setSendErrorMessage('Không thể gửi biểu tượng chào.');
+    } catch (err) {
+      setSendErrorMessage("Không thể gửi biểu tượng chào.");
     } finally {
       setIsSending(false);
     }
@@ -497,69 +359,29 @@ function ChatAreaContent({
   };
 
   const isGroup = activeConversation.type === 'GROUP';
-
-  const headerTitle =
-    activeConversation.title ||
-    (activeConversation.otherUser
-      ? activeConversation.otherUser.displayName
-      : 'Đoạn chat');
-
-  const headerAvatar =
-    activeConversation.avatarUrl ||
-    (activeConversation.otherUser
-      ? activeConversation.otherUser.avatarUrl
-      : '');
+  const headerTitle = activeConversation.title || (activeConversation.otherUser ? activeConversation.otherUser.displayName : 'Đoạn chat');
+  const headerAvatar = activeConversation.avatarUrl || (activeConversation.otherUser ? activeConversation.otherUser.avatarUrl : '');
 
   const otherUserId = activeConversation.otherUser?.id;
-
-  const isOtherOnline =
-    !isGroup && otherUserId
-      ? (presenceMap[otherUserId] ?? false)
-      : false;
-
-  const otherLastSeen =
-    !isGroup && otherUserId
-      ? lastSeenMap[otherUserId]
-      : null;
+  const isOtherOnline = !isGroup && otherUserId ? (presenceMap[otherUserId] ?? false) : false;
+  const otherLastSeen = !isGroup && otherUserId ? lastSeenMap[otherUserId] : null;
 
   const getPresenceText = () => {
-    if (typingUser) {
-      return `${typingUser} đang soạn tin nhắn...`;
-    }
-
-    if (isGroup) {
-      return `${activeConversation.memberCount || 2} thành viên`;
-    }
-
-    if (isOtherOnline) {
-      return 'Đang hoạt động';
-    }
-
-    if (otherLastSeen) {
-      return `Hoạt động ${formatSidebarTime(otherLastSeen)}`;
-    }
-
+    if (typingUser) return `${typingUser} đang soạn tin nhắn...`;
+    if (isGroup) return `${activeConversation.memberCount || 2} thành viên`;
+    if (isOtherOnline) return 'Đang hoạt động';
+    if (otherLastSeen) return `Hoạt động ${formatSidebarTime(otherLastSeen)}`;
     return 'Không hoạt động';
   };
 
-  const pinnedMessages = messages.filter(
-    (m) => m.isPinned && !m.isDeleted
-  );
-
-  const latestPinned =
-    pinnedMessages.length > 0
-      ? pinnedMessages[pinnedMessages.length - 1]
-      : null;
+  const pinnedMessages = messages.filter((m) => m.isPinned && !m.isDeleted);
+  const latestPinned = pinnedMessages.length > 0 ? pinnedMessages[pinnedMessages.length - 1] : null;
 
   return (
-    <main
-      className={`flex-1 flex flex-col h-full overflow-hidden select-none relative transition-colors ${
-        isDarkMode
-          ? 'bg-slate-950 text-slate-100'
-          : 'bg-white text-slate-900'
-      }`}
-    >
-      {/* File inputs */}
+    <main className={`flex-1 flex flex-col h-full overflow-hidden select-none relative transition-colors ${
+      isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-white text-slate-900'
+    }`}>
+      {/* File inputs: Chặn file thực thi nguy hiểm */}
       <input
         type="file"
         ref={imageInputRef}
@@ -567,7 +389,6 @@ function ChatAreaContent({
         className="hidden"
         onChange={handleFileChange}
       />
-
       <input
         type="file"
         ref={fileInputRef}
@@ -576,14 +397,10 @@ function ChatAreaContent({
         onChange={handleFileChange}
       />
 
-      {/* Header */}
-      <header
-        className={`h-16 border-b px-4 md:px-5 flex items-center justify-between shadow-2xs flex-shrink-0 z-10 transition-colors ${
-          isDarkMode
-            ? 'bg-slate-900/80 border-slate-800'
-            : 'bg-white border-slate-200/80'
-        }`}
-      >
+      {/* 1. Header cuộc trò chuyện */}
+      <header className={`h-16 border-b px-4 md:px-5 flex items-center justify-between shadow-2xs flex-shrink-0 z-10 transition-colors ${
+        isDarkMode ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-slate-200/80'
+      }`}>
         <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={onBack}
@@ -595,37 +412,18 @@ function ChatAreaContent({
 
           <div className="relative flex-shrink-0">
             {headerAvatar ? (
-              <img
-                src={headerAvatar}
-                alt=""
-                className="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700"
-              />
+              <img src={headerAvatar} alt="" className="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700" />
             ) : (
-              <div
-                className={`w-10 h-10 rounded-full text-white flex items-center justify-center font-bold text-sm shadow-xs ${
-                  isGroup
-                    ? 'bg-gradient-to-tr from-purple-600 to-indigo-500'
-                    : 'bg-gradient-to-tr from-[#0062FF] to-sky-400'
-                }`}
-              >
-                {headerTitle
-                  ? headerTitle.charAt(0).toUpperCase()
-                  : 'U'}
+              <div className={`w-10 h-10 rounded-full text-white flex items-center justify-center font-bold text-sm shadow-xs ${
+                isGroup ? 'bg-gradient-to-tr from-purple-600 to-indigo-500' : 'bg-gradient-to-tr from-[#0062FF] to-sky-400'
+              }`}>
+                {headerTitle ? headerTitle.charAt(0).toUpperCase() : 'U'}
               </div>
             )}
-
             {!isGroup && (
-              <span
-                className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 ${
-                  isDarkMode
-                    ? 'border-slate-900'
-                    : 'border-white'
-                } ${
-                  isOtherOnline
-                    ? 'bg-emerald-500'
-                    : 'bg-slate-400'
-                }`}
-              />
+              <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 ${
+                isDarkMode ? 'border-slate-900' : 'border-white'
+              } ${isOtherOnline ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
             )}
           </div>
 
@@ -633,16 +431,9 @@ function ChatAreaContent({
             <h2 className="font-bold text-sm leading-tight truncate text-slate-900 dark:text-white">
               {headerTitle}
             </h2>
-
-            <span
-              className={`text-xs block truncate font-medium mt-0.5 ${
-                typingUser
-                  ? 'text-[#0062FF] animate-pulse font-semibold'
-                  : isOtherOnline
-                    ? 'text-emerald-500'
-                    : 'text-slate-400'
-              }`}
-            >
+            <span className={`text-xs block truncate font-medium mt-0.5 ${
+              typingUser ? 'text-[#0062FF] animate-pulse font-semibold' : isOtherOnline ? 'text-emerald-500' : 'text-slate-400'
+            }`}>
               {getPresenceText()}
             </span>
           </div>
@@ -656,23 +447,15 @@ function ChatAreaContent({
           >
             <FolderOpen className="w-5 h-5" />
           </button>
-
           <button
-            onClick={() => {
-              setIsSearching(!isSearching);
-              setSearchQuery('');
-              setCurrentSearchIndex(0);
-            }}
+            onClick={() => { setIsSearching(!isSearching); setSearchQuery(''); setSearchResults([]); }}
             className={`p-2 rounded-xl transition-colors cursor-pointer ${
-              isSearching
-                ? 'bg-blue-50 text-[#0062FF] dark:bg-slate-800 dark:text-white'
-                : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+              isSearching ? 'bg-blue-50 text-[#0062FF] dark:bg-slate-800 dark:text-white' : 'hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
             title="Tìm kiếm tin nhắn"
           >
             <Search className="w-5 h-5" />
           </button>
-
           <button
             onClick={onOpenGroupDetailModal}
             className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
@@ -685,62 +468,37 @@ function ChatAreaContent({
 
       {/* Tìm kiếm */}
       {isSearching && (
-        <div
-          className={`px-4 py-2 border-b flex items-center justify-between gap-3 ${
-            isDarkMode
-              ? 'bg-slate-900 border-slate-800'
-              : 'bg-slate-50 border-slate-200'
-          }`}
-        >
-          <div
-            className={`flex-1 flex items-center border rounded-xl px-3 py-1.5 ${
-              isDarkMode
-                ? 'bg-slate-800 border-slate-700 text-white'
-                : 'bg-white border-slate-200 text-slate-800'
-            }`}
-          >
+        <div className={`px-4 py-2 border-b flex items-center justify-between gap-3 ${
+          isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'
+        }`}>
+          <div className={`flex-1 flex items-center border rounded-xl px-3 py-1.5 ${
+            isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'
+          }`}>
             <Search className="w-4 h-4 text-slate-400 mr-2 flex-shrink-0" />
-
             <input
               type="text"
               placeholder="Tìm tin nhắn..."
               value={searchQuery}
-              onChange={handleSearchChange}
+              onChange={(e) => setSearchQuery(e.target.value)}
               className="flex-1 text-xs bg-transparent focus:outline-none placeholder:text-slate-400"
               autoFocus
             />
+            {isSearchingLoading && <Loader2 className="w-3.5 h-3.5 animate-spin text-[#0062FF]" />}
           </div>
 
           {searchResults.length > 0 && (
             <div className="flex items-center gap-1 text-xs text-slate-400 font-semibold">
-              <span>
-                {currentSearchIndex + 1}/{searchResults.length}
-              </span>
-
-              <button
-                onClick={handlePrevSearch}
-                className="p-1 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
-              >
+              <span>{currentSearchIndex + 1}/{searchResults.length}</span>
+              <button onClick={handlePrevSearch} className="p-1 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg cursor-pointer">
                 <ChevronUp className="w-4 h-4" />
               </button>
-
-              <button
-                onClick={handleNextSearch}
-                className="p-1 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
-              >
+              <button onClick={handleNextSearch} className="p-1 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg cursor-pointer">
                 <ChevronDown className="w-4 h-4" />
               </button>
             </div>
           )}
 
-          <button
-            onClick={() => {
-              setIsSearching(false);
-              setSearchQuery('');
-              setCurrentSearchIndex(0);
-            }}
-            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl cursor-pointer"
-          >
+          <button onClick={() => { setIsSearching(false); setSearchQuery(''); setSearchResults([]); }} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -748,60 +506,37 @@ function ChatAreaContent({
 
       {/* Ghim tin nhắn */}
       {latestPinned && (
-        <div
-          className={`px-4 py-2 border-b flex items-center justify-between gap-3 flex-shrink-0 ${
-            isDarkMode
-              ? 'bg-blue-950/40 border-blue-900/50 text-blue-200'
-              : 'bg-blue-50/80 border-blue-200/80 text-blue-950'
-          }`}
-        >
-          <div
-            className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer"
-            onClick={() => jumpToMessageId(latestPinned.id)}
-          >
+        <div className={`px-4 py-2 border-b flex items-center justify-between gap-3 flex-shrink-0 ${
+          isDarkMode ? 'bg-blue-950/40 border-blue-900/50 text-blue-200' : 'bg-blue-50/80 border-blue-200/80 text-blue-950'
+        }`}>
+          <div className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer" onClick={() => jumpToMessageId(latestPinned.id)}>
             <div className="w-6 h-6 rounded-lg bg-[#0062FF] text-white flex items-center justify-center flex-shrink-0">
               <Pin className="w-3.5 h-3.5" />
             </div>
-
             <div className="truncate text-xs">
               <span className="font-bold mr-1">
-                {pinnedMessages.length > 1
-                  ? `${pinnedMessages.length} tin nhắn đã ghim:`
-                  : 'Tin nhắn đã ghim:'}
+                {pinnedMessages.length > 1 ? `${pinnedMessages.length} tin nhắn đã ghim:` : 'Tin nhắn đã ghim:'}
               </span>
-
               <span className="opacity-90 truncate">
-                {latestPinned.messageType === 'IMAGE'
-                  ? '[Hình ảnh]'
-                  : latestPinned.messageType === 'FILE'
-                    ? `[Tệp] ${latestPinned.fileName || ''}`
-                    : latestPinned.content}
+                {latestPinned.messageType === 'IMAGE' ? '[Hình ảnh]' : latestPinned.messageType === 'FILE' ? `[Tệp] ${latestPinned.fileName || ''}` : latestPinned.content}
               </span>
             </div>
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
             {pinnedMessages.length > 1 && (
-              <button
-                onClick={onOpenPinnedModal}
-                className="text-xs font-bold text-[#0062FF] hover:underline px-1.5 py-0.5 rounded cursor-pointer"
-              >
+              <button onClick={onOpenPinnedModal} className="text-xs font-bold text-[#0062FF] hover:underline px-1.5 py-0.5 rounded cursor-pointer">
                 Xem tất cả ({pinnedMessages.length})
               </button>
             )}
-
-            <button
-              onClick={() => onTogglePinMessage(latestPinned.id)}
-              className="p-1.5 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-lg cursor-pointer"
-              title="Bỏ ghim"
-            >
+            <button onClick={() => onTogglePinMessage(latestPinned.id)} className="p-1.5 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-lg cursor-pointer" title="Bỏ ghim">
               <PinOff className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
       )}
 
-      {/* Danh sách tin nhắn */}
+      {/* 2. Danh sách tin nhắn */}
       <div
         ref={messagesContainerRef}
         onScroll={handleScroll}
@@ -813,31 +548,18 @@ function ChatAreaContent({
           <ChatTimelineSkeleton isDarkMode={isDarkMode} />
         ) : messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-slate-400 text-center px-4">
-            <div
-              className={`w-16 h-16 rounded-full text-white flex items-center justify-center text-xl font-bold mb-3 shadow-md ${
-                isGroup
-                  ? 'bg-purple-600'
-                  : 'bg-gradient-to-tr from-[#0062FF] to-sky-400'
-              }`}
-            >
+            <div className={`w-16 h-16 rounded-full text-white flex items-center justify-center text-xl font-bold mb-3 shadow-md ${
+              isGroup ? 'bg-purple-600' : 'bg-gradient-to-tr from-[#0062FF] to-sky-400'
+            }`}>
               {headerTitle.charAt(0).toUpperCase()}
             </div>
-
-            <h4 className="font-bold text-base text-slate-700 dark:text-slate-200">
-              {headerTitle}
-            </h4>
-
-            <p className="text-xs text-slate-400 mt-1 max-w-xs">
-              Chưa có tin nhắn nào trong cuộc trò chuyện này.
-              Hãy gửi lời chào đầu tiên!
-            </p>
-
+            <h4 className="font-bold text-base text-slate-700 dark:text-slate-200">{headerTitle}</h4>
+            <p className="text-xs text-slate-400 mt-1 max-w-xs">Chưa có tin nhắn nào trong cuộc trò chuyện này. Hãy gửi lời chào đầu tiên!</p>
             <button
               onClick={handleSendLike}
               className="mt-4 px-4 py-2 rounded-xl bg-blue-50 dark:bg-slate-800 hover:bg-blue-100 dark:hover:bg-slate-700 text-[#0062FF] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
             >
-              <ThumbsUp className="w-4 h-4" />
-              Vẫy tay chào 👍
+              <ThumbsUp className="w-4 h-4" /> Vẫy tay chào 👍
             </button>
           </div>
         ) : (
@@ -845,347 +567,177 @@ function ChatAreaContent({
             const isMe = msg.senderId === currentUserId;
             const isSystem = msg.messageType === 'SYSTEM';
             const isDeleted = msg.isDeleted;
-            const isImage =
-              msg.messageType === 'IMAGE' && !isDeleted;
-            const isFile =
-              msg.messageType === 'FILE' && !isDeleted;
-            const isLike =
-              msg.content === '👍' &&
-              !isDeleted &&
-              !isImage &&
-              !isFile;
+            const isImage = msg.messageType === 'IMAGE' && !isDeleted;
+            const isFile = msg.messageType === 'FILE' && !isDeleted;
+            const isLike = msg.content === '👍' && !isDeleted && !isImage && !isFile;
             const isHighlighted = highlightedMsgId === msg.id;
             const isSendingOptimistic = msg.isOptimistic;
 
-            const prevMsg =
-              index > 0 ? messages[index - 1] : null;
-
-            const showDateDivider =
-              !prevMsg ||
-              !isSameDay(prevMsg.createdAt, msg.createdAt);
+            const prevMsg = index > 0 ? messages[index - 1] : null;
+            const showDateDivider = !prevMsg || !isSameDay(prevMsg.createdAt, msg.createdAt);
 
             return (
-              <React.Fragment
-                key={msg.id || `msg-temp-${index}`}
-              >
+              <React.Fragment key={msg.id || `msg-temp-${index}`}>
                 {showDateDivider && (
                   <div className="flex justify-center my-4 select-none">
-                    <span
-                      className={`px-3 py-1 rounded-full text-[11px] font-semibold tracking-wide border shadow-2xs ${
-                        isDarkMode
-                          ? 'bg-slate-900 border-slate-800 text-slate-400'
-                          : 'bg-slate-100 border-slate-200 text-slate-500'
-                      }`}
-                    >
+                    <span className={`px-3 py-1 rounded-full text-[11px] font-semibold tracking-wide border shadow-2xs ${
+                      isDarkMode
+                        ? 'bg-slate-900 border-slate-800 text-slate-400'
+                        : 'bg-slate-100 border-slate-200 text-slate-500'
+                    }`}>
                       {formatDateDivider(msg.createdAt)}
                     </span>
                   </div>
                 )}
 
                 {isSystem ? (
-                  <div
-                    id={`msg-${msg.id}`}
-                    className="flex justify-center my-3"
-                  >
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs font-medium border text-center ${
-                        isDarkMode
-                          ? 'bg-slate-900 border-slate-800 text-slate-400'
-                          : 'bg-slate-100 border-slate-200/80 text-slate-600'
-                      }`}
-                    >
+                  <div id={`msg-${msg.id}`} className="flex justify-center my-3">
+                    <span className={`px-3 py-1 rounded-full text-xs font-medium border text-center ${
+                      isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-400' : 'bg-slate-100 border-slate-200/80 text-slate-600'
+                    }`}>
                       {msg.content}
                     </span>
                   </div>
                 ) : (
                   <div
                     id={`msg-${msg.id}`}
-                    onMouseEnter={() =>
-                      !isSendingOptimistic &&
-                      setHoveredMessageId(msg.id)
-                    }
-                    onMouseLeave={() =>
-                      setHoveredMessageId(null)
-                    }
+                    onMouseEnter={() => !isSendingOptimistic && setHoveredMessageId(msg.id)}
+                    onMouseLeave={() => setHoveredMessageId(null)}
                     className={`relative flex items-end gap-2.5 group transition-all duration-300 rounded-xl p-1 ${
-                      isHighlighted
-                        ? 'bg-blue-100/50 dark:bg-blue-950/40 ring-2 ring-[#0062FF]'
-                        : ''
-                    } ${
-                      isMe ? 'justify-end' : 'justify-start'
-                    }`}
+                      isHighlighted ? 'bg-blue-100/50 dark:bg-blue-950/40 ring-2 ring-[#0062FF]' : ''
+                    } ${isMe ? 'justify-end' : 'justify-start'}`}
                   >
                     {!isMe && (
                       <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center text-xs font-bold flex-shrink-0 mb-1">
-                        {msg.senderName
-                          ? msg.senderName.charAt(0).toUpperCase()
-                          : 'U'}
+                        {msg.senderName ? msg.senderName.charAt(0).toUpperCase() : 'U'}
                       </div>
                     )}
 
-                    {/* Thanh reaction */}
-                    {!isDeleted &&
-                      !isSendingOptimistic &&
-                      hoveredMessageId === msg.id && (
-                        <div
-                          className={`absolute -top-8 ${
-                            isMe ? 'right-0' : 'left-9'
-                          } border shadow-md rounded-full px-2 py-0.5 flex items-center gap-1 z-20 ${
-                            isDarkMode
-                              ? 'bg-slate-900 border-slate-700'
-                              : 'bg-white border-slate-200'
-                          }`}
-                        >
-                          <div className="flex items-center gap-0.5 pr-1 border-r border-slate-200 dark:border-slate-700">
-                            {REACTION_LIST.map((emoji) => (
-                              <button
-                                key={emoji}
-                                onClick={() =>
-                                  onToggleReaction(msg.id, emoji)
-                                }
-                                className="hover:scale-125 transition-transform text-sm p-1 cursor-pointer"
-                              >
-                                {emoji}
-                              </button>
-                            ))}
-                          </div>
-
-                          <button
-                            onClick={() => setReplyingTo(msg)}
-                            className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-400 hover:text-slate-600 cursor-pointer"
-                            title="Trả lời"
-                          >
-                            <Reply className="w-3.5 h-3.5" />
-                          </button>
-
-                          <button
-                            onClick={() =>
-                              onStartForwardMessage(msg)
-                            }
-                            className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-400 hover:text-slate-600 cursor-pointer"
-                            title="Chuyển tiếp"
-                          >
-                            <Share2 className="w-3.5 h-3.5" />
-                          </button>
-
-                          <button
-                            onClick={() =>
-                              onTogglePinMessage(msg.id)
-                            }
-                            className={`p-1 rounded-full cursor-pointer ${
-                              msg.isPinned
-                                ? 'text-[#0062FF]'
-                                : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-                            }`}
-                            title={msg.isPinned ? 'Bỏ ghim' : 'Ghim'}
-                          >
-                            <Pin className="w-3.5 h-3.5" />
-                          </button>
-
-                          {isMe && (
-                            <>
-                              {!isImage && !isFile && (
-                                <button
-                                  onClick={() =>
-                                    handleStartEdit(msg)
-                                  }
-                                  className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-400 hover:text-slate-600 cursor-pointer"
-                                  title="Chỉnh sửa"
-                                >
-                                  <Edit2 className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-
-                              <button
-                                onClick={() =>
-                                  onDeleteMessage(msg.id)
-                                }
-                                className="p-1 hover:bg-red-50 dark:hover:bg-red-950/40 text-slate-400 hover:text-red-500 rounded-full cursor-pointer"
-                                title="Thu hồi"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </>
-                          )}
+                    {/* Thanh cảm xúc nổi */}
+                    {!isDeleted && !isSendingOptimistic && hoveredMessageId === msg.id && (
+                      <div className={`absolute -top-8 ${isMe ? 'right-0' : 'left-9'} border shadow-md rounded-full px-2 py-0.5 flex items-center gap-1 z-20 ${
+                        isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
+                      }`}>
+                        <div className="flex items-center gap-0.5 pr-1 border-r border-slate-200 dark:border-slate-700">
+                          {REACTION_LIST.map((emoji) => (
+                            <button key={emoji} onClick={() => onToggleReaction(msg.id, emoji)} className="hover:scale-125 transition-transform text-sm p-1 cursor-pointer">
+                              {emoji}
+                            </button>
+                          ))}
                         </div>
-                      )}
 
-                    <div
-                      className={`flex flex-col ${
-                        isMe ? 'items-end' : 'items-start'
-                      } max-w-[85%] sm:max-w-[75%] md:max-w-lg ${
-                        isSendingOptimistic ? 'opacity-70' : ''
-                      }`}
-                    >
+                        <button onClick={() => setReplyingTo(msg)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-400 hover:text-slate-600 cursor-pointer" title="Trả lời">
+                          <Reply className="w-3.5 h-3.5" />
+                        </button>
+
+                        <button onClick={() => onStartForwardMessage(msg)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-400 hover:text-slate-600 cursor-pointer" title="Chuyển tiếp">
+                          <Share2 className="w-3.5 h-3.5" />
+                        </button>
+
+                        <button onClick={() => onTogglePinMessage(msg.id)} className={`p-1 rounded-full cursor-pointer ${msg.isPinned ? 'text-[#0062FF]' : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`} title={msg.isPinned ? 'Bỏ ghim' : 'Ghim'}>
+                          <Pin className="w-3.5 h-3.5" />
+                        </button>
+
+                        {isMe && (
+                          <>
+                            {!isImage && !isFile && (
+                              <button onClick={() => handleStartEdit(msg)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-400 hover:text-slate-600 cursor-pointer" title="Chỉnh sửa">
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <button onClick={() => onDeleteMessage(msg.id)} className="p-1 hover:bg-red-50 dark:hover:bg-red-950/40 text-slate-400 hover:text-red-500 rounded-full cursor-pointer" title="Thu hồi">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[85%] sm:max-w-[75%] md:max-w-lg ${isSendingOptimistic ? 'opacity-70' : ''}`}>
                       {isGroup && !isMe && msg.senderName && (
-                        <span className="text-xs font-semibold text-slate-400 ml-1 mb-1">
-                          {msg.senderName}
-                        </span>
+                        <span className="text-xs font-semibold text-slate-400 ml-1 mb-1">{msg.senderName}</span>
                       )}
 
                       {msg.replyTo && (
-                        <div
-                          className={`text-xs px-3 py-1.5 mb-1 rounded-xl border-l-2 truncate max-w-full ${
-                            isDarkMode
-                              ? 'bg-slate-900 text-slate-300'
-                              : 'bg-slate-100 text-slate-600'
-                          } ${
-                            isMe
-                              ? 'border-[#0062FF]'
-                              : 'border-slate-400'
-                          }`}
-                        >
-                          <span className="font-bold mr-1">
-                            {msg.replyTo.senderName}:
-                          </span>
+                        <div className={`text-xs px-3 py-1.5 mb-1 rounded-xl border-l-2 truncate max-w-full ${
+                          isDarkMode ? 'bg-slate-900 text-slate-300' : 'bg-slate-100 text-slate-600'
+                        } ${isMe ? 'border-[#0062FF]' : 'border-slate-400'}`}>
+                          <span className="font-bold mr-1">{msg.replyTo.senderName}:</span>
                           <span>{msg.replyTo.content}</span>
                         </div>
                       )}
 
                       {isDeleted ? (
-                        <div
-                          className={`px-4 py-2.5 rounded-2xl text-sm border italic ${
-                            isDarkMode
-                              ? 'bg-slate-900 border-slate-800 text-slate-500'
-                              : 'bg-slate-50 border-slate-200 text-slate-400'
-                          }`}
-                        >
+                        <div className={`px-4 py-2.5 rounded-2xl text-sm border italic ${
+                          isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-400'
+                        }`}>
                           Tin nhắn đã bị thu hồi
                         </div>
                       ) : isImage ? (
                         <div className="space-y-1.5">
-                          <img
-                            src={msg.mediaUrl}
-                            alt=""
-                            onClick={() =>
-                              setPreviewModalImg(msg.mediaUrl)
-                            }
-                            className="rounded-2xl max-h-72 max-w-full object-cover cursor-pointer hover:opacity-95 shadow-xs border border-slate-200 dark:border-slate-800"
-                          />
-
+                          <img src={msg.mediaUrl} alt="" onClick={() => setPreviewModalImg(msg.mediaUrl)} className="rounded-2xl max-h-72 max-w-full object-cover cursor-pointer hover:opacity-95 shadow-xs border border-slate-200 dark:border-slate-800" />
                           {msg.content && (
-                            <div
-                              className={`px-4 py-2 rounded-xl text-sm leading-relaxed ${
-                                isMe
-                                  ? currentTheme.bgBubble
-                                  : isDarkMode
-                                    ? 'bg-slate-800 text-slate-100'
-                                    : 'bg-slate-100 text-slate-900'
-                              }`}
-                            >
+                            <div className={`px-4 py-2 rounded-xl text-sm leading-relaxed ${isMe ? currentTheme.bgBubble : isDarkMode ? 'bg-slate-800 text-slate-100' : 'bg-slate-100 text-slate-900'}`}>
                               {msg.content}
                             </div>
                           )}
                         </div>
                       ) : isFile ? (
-                        <div
-                          className={`p-3 rounded-2xl flex items-center gap-3 shadow-xs border ${
-                            isMe
-                              ? isDarkMode
-                                ? 'bg-blue-950/40 border-blue-900/60 rounded-br-xs'
-                                : 'bg-blue-50 border-blue-200 rounded-br-xs'
-                              : isDarkMode
-                                ? 'bg-slate-800 border-slate-700 rounded-bl-xs'
-                                : 'bg-slate-100 border-slate-200 rounded-bl-xs'
-                          }`}
-                        >
+                        <div className={`p-3 rounded-2xl flex items-center gap-3 shadow-xs border ${
+                          isMe
+                            ? isDarkMode ? 'bg-blue-950/40 border-blue-900/60 rounded-br-xs' : 'bg-blue-50 border-blue-200 rounded-br-xs'
+                            : isDarkMode ? 'bg-slate-800 border-slate-700 rounded-bl-xs' : 'bg-slate-100 border-slate-200 rounded-bl-xs'
+                        }`}>
                           <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-900 flex items-center justify-center text-[#0062FF] shadow-xs flex-shrink-0">
                             <FileText className="w-5 h-5" />
                           </div>
-
                           <div className="min-w-0 flex-1">
-                            <p className="text-xs font-bold truncate">
-                              {msg.fileName || 'Tài liệu'}
-                            </p>
-                            <p className="text-xs text-slate-400 mt-0.5">
-                              {formatFileSize(msg.fileSize)}
-                            </p>
+                            <p className="text-xs font-bold truncate">{msg.fileName || 'Tài liệu'}</p>
+                            <p className="text-xs text-slate-400 mt-0.5">{formatFileSize(msg.fileSize)}</p>
                           </div>
-
                           {msg.mediaUrl && (
-                            <a
-                              href={`${API_BASE.replace(/\/api$/, '')}${msg.mediaUrl}`}
-                              download={msg.fileName}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="p-2 bg-white dark:bg-slate-900 hover:bg-[#0062FF] hover:text-white text-[#0062FF] rounded-xl shadow-xs flex-shrink-0 transition-colors"
-                            >
+                            <a href={`${API_BASE.replace(/\/api$/, '')}${msg.mediaUrl}`} download={msg.fileName} target="_blank" rel="noreferrer" className="p-2 bg-white dark:bg-slate-900 hover:bg-[#0062FF] hover:text-white text-[#0062FF] rounded-xl shadow-xs flex-shrink-0 transition-colors">
                               <Download className="w-4 h-4" />
                             </a>
                           )}
                         </div>
                       ) : isLike ? (
-                        <div className="text-4xl select-none my-1 hover:scale-110 transition-transform">
-                          👍
-                        </div>
+                        <div className="text-4xl select-none my-1 hover:scale-110 transition-transform">👍</div>
                       ) : (
-                        <div
-                          className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed break-words whitespace-pre-wrap select-text ${
-                            isMe
-                              ? `${currentTheme.bgBubble} rounded-br-xs shadow-xs`
-                              : isDarkMode
-                                ? 'bg-slate-800 text-slate-100 rounded-bl-xs'
-                                : 'bg-slate-100 text-slate-900 rounded-bl-xs'
-                          }`}
-                        >
+                        <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed break-words whitespace-pre-wrap select-text ${
+                          isMe ? `${currentTheme.bgBubble} rounded-br-xs shadow-xs` : isDarkMode ? 'bg-slate-800 text-slate-100 rounded-bl-xs' : 'bg-slate-100 text-slate-900 rounded-bl-xs'
+                        }`}>
                           {msg.content}
                         </div>
                       )}
 
-                      {msg.reactions &&
-                        msg.reactions.length > 0 &&
-                        !isDeleted && (
-                          <div
-                            className={`-mt-2.5 border rounded-full px-2 py-0.5 text-xs shadow-xs flex items-center gap-1 z-10 cursor-pointer ${
-                              isDarkMode
-                                ? 'bg-slate-900 border-slate-700'
-                                : 'bg-white border-slate-200'
-                            } ${
-                              isMe
-                                ? 'mr-1 self-end'
-                                : 'ml-1 self-start'
-                            }`}
-                          >
-                            {Array.from(
-                              new Set(
-                                msg.reactions.map(
-                                  (r) => r.reaction
-                                )
-                              )
-                            ).map((emoji) => (
-                              <span key={emoji}>{emoji}</span>
-                            ))}
-
-                            {msg.reactions.length > 1 && (
-                              <span className="text-xs text-slate-400 font-bold">
-                                {msg.reactions.length}
-                              </span>
-                            )}
-                          </div>
-                        )}
+                      {msg.reactions && msg.reactions.length > 0 && !isDeleted && (
+                        <div className={`-mt-2.5 border rounded-full px-2 py-0.5 text-xs shadow-xs flex items-center gap-1 z-10 cursor-pointer ${
+                          isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
+                        } ${isMe ? 'mr-1 self-end' : 'ml-1 self-start'}`}>
+                          {Array.from(new Set(msg.reactions.map((r) => r.reaction))).map((emoji) => (
+                            <span key={emoji}>{emoji}</span>
+                          ))}
+                          {msg.reactions.length > 1 && (
+                            <span className="text-xs text-slate-400 font-bold">{msg.reactions.length}</span>
+                          )}
+                        </div>
+                      )}
 
                       <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-1 px-1">
                         {isSendingOptimistic ? (
                           <span className="flex items-center gap-1 text-slate-400 italic">
-                            <Clock className="w-3 h-3 animate-spin" />
-                            Đang gửi...
+                            <Clock className="w-3 h-3 animate-spin" /> Đang gửi...
                           </span>
                         ) : (
                           <>
                             {msg.isPinned && !isDeleted && (
                               <span className="flex items-center text-[#0062FF] gap-0.5 font-bold">
-                                <Pin className="w-3 h-3 fill-[#0062FF]" />
-                                Đã ghim
+                                <Pin className="w-3 h-3 fill-[#0062FF]" /> Đã ghim
                               </span>
                             )}
-
-                            <span>
-                              {formatMessageTime(msg.createdAt)}
-                            </span>
-
-                            {msg.isEdited && !isDeleted && (
-                              <span>· Đã sửa</span>
-                            )}
+                            <span>{formatMessageTime(msg.createdAt)}</span>
+                            {msg.isEdited && !isDeleted && <span>· Đã sửa</span>}
                           </>
                         )}
                       </div>
@@ -1199,28 +751,21 @@ function ChatAreaContent({
 
         {typingUser && (
           <div className="flex items-center gap-2 text-slate-400 text-xs pl-1">
-            <div
-              className={`px-3.5 py-2 rounded-2xl rounded-bl-xs flex items-center gap-1.5 border ${
-                isDarkMode
-                  ? 'bg-slate-800 border-slate-700'
-                  : 'bg-slate-100 border-slate-200'
-              }`}
-            >
-              <span className="w-1.5 h-1.5 bg-[#0062FF] rounded-full animate-bounce [animation-delay:0ms]" />
-              <span className="w-1.5 h-1.5 bg-[#0062FF] rounded-full animate-bounce [animation-delay:150ms]" />
-              <span className="w-1.5 h-1.5 bg-[#0062FF] rounded-full animate-bounce [animation-delay:300ms]" />
+            <div className={`px-3.5 py-2 rounded-2xl rounded-bl-xs flex items-center gap-1.5 border ${
+              isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-100 border-slate-200'
+            }`}>
+              <span className="w-1.5 h-1.5 bg-[#0062FF] rounded-full animate-bounce [animation-delay:0ms]"></span>
+              <span className="w-1.5 h-1.5 bg-[#0062FF] rounded-full animate-bounce [animation-delay:150ms]"></span>
+              <span className="w-1.5 h-1.5 bg-[#0062FF] rounded-full animate-bounce [animation-delay:300ms]"></span>
             </div>
-
-            <span className="text-xs text-slate-400 font-medium">
-              {typingUser} đang soạn tin...
-            </span>
+            <span className="text-xs text-slate-400 font-medium">{typingUser} đang soạn tin...</span>
           </div>
         )}
 
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Nút cuộn xuống */}
+      {/* Nút cuộn xuống đáy */}
       {showScrollBottom && (
         <button
           onClick={() => scrollToBottom('smooth')}
@@ -1231,21 +776,16 @@ function ChatAreaContent({
         </button>
       )}
 
-      {/* Thanh nhập tin nhắn */}
-      <footer
-        className={`border-t flex-shrink-0 flex flex-col transition-colors ${
-          isDarkMode
-            ? 'bg-slate-900 border-slate-800'
-            : 'bg-white border-slate-200/80'
-        }`}
-      >
+      {/* 3. Thanh nhập tin nhắn */}
+      <footer className={`border-t flex-shrink-0 flex flex-col transition-colors ${
+        isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200/80'
+      }`}>
         {sendErrorMessage && (
           <div className="px-4 py-2 bg-rose-500/10 border-b border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-semibold flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <AlertCircle className="w-4 h-4" />
               <span>{sendErrorMessage}</span>
             </div>
-
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -1254,7 +794,6 @@ function ChatAreaContent({
               >
                 Thử lại
               </button>
-
               <button
                 type="button"
                 onClick={() => setSendErrorMessage('')}
@@ -1267,25 +806,14 @@ function ChatAreaContent({
         )}
 
         {replyingTo && (
-          <div
-            className={`px-4 py-2 border-b flex items-center justify-between text-xs ${
-              isDarkMode
-                ? 'bg-slate-800 border-slate-700 text-slate-300'
-                : 'bg-slate-100 border-slate-200 text-slate-700'
-            }`}
-          >
+          <div className={`px-4 py-2 border-b flex items-center justify-between text-xs ${
+            isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-700'
+          }`}>
             <div className="flex items-center gap-2 truncate">
               <Reply className="w-4 h-4 text-[#0062FF]" />
-              <span>
-                Đang trả lời <b>{replyingTo.senderName}</b>:{' '}
-                {replyingTo.content}
-              </span>
+              <span>Đang trả lời <b>{replyingTo.senderName}</b>: {replyingTo.content}</span>
             </div>
-
-            <button
-              onClick={cancelEditOrReply}
-              className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg cursor-pointer"
-            >
+            <button onClick={cancelEditOrReply} className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg cursor-pointer">
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -1297,96 +825,53 @@ function ChatAreaContent({
               <Edit2 className="w-4 h-4" />
               <span>Đang chỉnh sửa tin nhắn</span>
             </div>
-
-            <button
-              onClick={cancelEditOrReply}
-              className="p-1 hover:bg-amber-500/20 rounded-lg cursor-pointer"
-            >
+            <button onClick={cancelEditOrReply} className="p-1 hover:bg-amber-500/20 rounded-lg cursor-pointer">
               <X className="w-4 h-4" />
             </button>
           </div>
         )}
 
         {selectedFile && (
-          <div
-            className={`px-4 py-2.5 border-b flex items-center justify-between ${
-              isDarkMode
-                ? 'bg-slate-800/60 border-slate-700'
-                : 'bg-slate-50 border-slate-200'
-            }`}
-          >
+          <div className={`px-4 py-2.5 border-b flex items-center justify-between ${
+            isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50 border-slate-200'
+          }`}>
             <div className="flex items-center gap-3 truncate">
               {filePreviewUrl ? (
-                <img
-                  src={filePreviewUrl}
-                  alt=""
-                  className="w-12 h-12 rounded-xl object-cover border border-slate-200 dark:border-slate-700"
-                />
+                <img src={filePreviewUrl} alt="" className="w-12 h-12 rounded-xl object-cover border border-slate-200 dark:border-slate-700" />
               ) : (
                 <div className="w-12 h-12 rounded-xl bg-blue-100 dark:bg-slate-800 text-[#0062FF] flex items-center justify-center">
                   <FileText className="w-6 h-6" />
                 </div>
               )}
-
               <div className="text-xs truncate">
-                <p className="font-bold truncate">
-                  {selectedFile.name}
-                </p>
-
+                <p className="font-bold truncate">{selectedFile.name}</p>
                 <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-slate-400">
-                    {formatFileSize(selectedFile.size)}
-                  </span>
-
+                  <span className="text-slate-400">{formatFileSize(selectedFile.size)}</span>
                   {isUploading && (
-                    <span className="text-[#0062FF] font-bold">
-                      ({uploadPercent}%)
-                    </span>
+                    <span className="text-[#0062FF] font-bold">({uploadPercent}%)</span>
                   )}
                 </div>
               </div>
             </div>
-
-            <button
-              onClick={removeSelectedFile}
-              className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 rounded-lg cursor-pointer"
-            >
+            <button onClick={removeSelectedFile} className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 rounded-lg cursor-pointer">
               <X className="w-4 h-4" />
             </button>
           </div>
         )}
 
-        <form
-          onSubmit={handleSubmit}
-          className="p-3 md:p-3.5 flex items-center gap-2 max-w-5xl mx-auto w-full"
-        >
+        <form onSubmit={handleSubmit} className="p-3 md:p-3.5 flex items-center gap-2 max-w-5xl mx-auto w-full">
           <div className="flex items-center gap-1 text-slate-500 dark:text-slate-400">
-            <button
-              type="button"
-              onClick={() => imageInputRef.current?.click()}
-              className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-              title="Gửi ảnh"
-            >
+            <button type="button" onClick={() => imageInputRef.current?.click()} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer" title="Gửi ảnh">
               <ImageIcon className="w-5 h-5" />
             </button>
-
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-              title="Gửi tệp đính kèm"
-            >
+            <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer" title="Gửi tệp đính kèm">
               <Paperclip className="w-5 h-5" />
             </button>
           </div>
 
-          <div
-            className={`flex-1 flex items-center rounded-xl px-4 py-2 border transition-all ${
-              isDarkMode
-                ? 'bg-slate-800/80 border-slate-700 focus-within:border-[#0062FF] focus-within:bg-slate-800'
-                : 'bg-slate-100/90 border-slate-200 focus-within:border-[#0062FF] focus-within:bg-white'
-            }`}
-          >
+          <div className={`flex-1 flex items-center rounded-xl px-4 py-2 border transition-all ${
+            isDarkMode ? 'bg-slate-800/80 border-slate-700 focus-within:border-[#0062FF] focus-within:bg-slate-800' : 'bg-slate-100/90 border-slate-200 focus-within:border-[#0062FF] focus-within:bg-white'
+          }`}>
             <input
               type="text"
               placeholder="Nhập tin nhắn... (Ctrl+V để dán ảnh/tệp)"
@@ -1394,16 +879,10 @@ function ChatAreaContent({
               onChange={handleInputChange}
               onPaste={handlePaste}
               className={`w-full bg-transparent border-none text-sm focus:outline-none ${
-                isDarkMode
-                  ? 'text-white placeholder:text-slate-500'
-                  : 'text-slate-900 placeholder:text-slate-400'
+                isDarkMode ? 'text-white placeholder:text-slate-500' : 'text-slate-900 placeholder:text-slate-400'
               }`}
             />
-
-            <button
-              type="button"
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 p-1"
-            >
+            <button type="button" className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 p-1">
               <Smile className="w-5 h-5" />
             </button>
           </div>
@@ -1439,25 +918,12 @@ function ChatAreaContent({
         </form>
       </footer>
 
-      {/* Xem ảnh toàn màn hình */}
       {previewModalImg && (
-        <div
-          className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-4 backdrop-blur-xs"
-          onClick={() => setPreviewModalImg(null)}
-        >
-          <button
-            onClick={() => setPreviewModalImg(null)}
-            className="absolute top-4 right-4 p-2 text-white/80 hover:text-white bg-white/10 rounded-xl cursor-pointer"
-          >
+        <div className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-4 backdrop-blur-xs" onClick={() => setPreviewModalImg(null)}>
+          <button onClick={() => setPreviewModalImg(null)} className="absolute top-4 right-4 p-2 text-white/80 hover:text-white bg-white/10 rounded-xl cursor-pointer">
             <X className="w-6 h-6" />
           </button>
-
-          <img
-            src={previewModalImg}
-            alt=""
-            className="max-h-[90vh] max-w-[90vw] object-contain rounded-xl shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          />
+          <img src={previewModalImg} alt="" className="max-h-[90vh] max-w-[90vw] object-contain rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()} />
         </div>
       )}
     </main>

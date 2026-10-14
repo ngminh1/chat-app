@@ -1,4 +1,4 @@
-
+import React from 'react';
 import { X, Pin, PinOff, ExternalLink } from 'lucide-react';
 import { formatMessageTime } from '../utils/formatTime';
 

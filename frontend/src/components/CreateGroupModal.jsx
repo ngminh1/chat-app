@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { X, Users, Check, Search, Loader2, UserPlus, Camera } from 'lucide-react';
 import { API_BASE } from '../config/api';

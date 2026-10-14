@@ -1,8 +1,6 @@
 // AES-256-GCM utility dùng Web Crypto API của trình duyệt.
 // File này CHỈ xử lý AES: encode/decode, encrypt/decrypt, import/export key.
-// ElGamal nằm ở module riêng; SHA-256 được dùng để kiểm tra integrity của encrypted payload.
-
-import { hashEncryptedPayload, verifyEncryptedPayload } from './sha256.js';
+// Không chứa ElGamal, SHA hoặc public/private key.
 
 const AES_NAME = 'AES-GCM';
 const AES_KEY_LENGTH = 256;
@@ -85,32 +83,16 @@ export async function encryptMessage(plaintext, key) {
     data
   );
 
-  const ciphertext = bytesToBase64(encryptedBuffer);
-  const ivBase64 = bytesToBase64(iv);
-  const encryptionVersion = 'AES-256-GCM';
-  const sha256 = await hashEncryptedPayload(ciphertext, ivBase64, encryptionVersion);
-
   return {
-    ciphertext,
-    iv: ivBase64,
-    encryptionVersion,
-    sha256
+    ciphertext: bytesToBase64(encryptedBuffer),
+    iv: bytesToBase64(iv),
+    encryptionVersion: 'AES-256-GCM'
   };
 }
 
-export async function decryptMessage(ciphertextBase64, ivBase64, key, expectedSha256 = null) {
+export async function decryptMessage(ciphertextBase64, ivBase64, key) {
   if (!key) throw new Error('Thiếu AES key');
   if (!ciphertextBase64 || !ivBase64) throw new Error('Thiếu ciphertext hoặc IV');
-
-  const integrityOk = await verifyEncryptedPayload(
-    ciphertextBase64,
-    ivBase64,
-    'AES-256-GCM',
-    expectedSha256
-  );
-  if (!integrityOk) {
-    throw new Error('SHA-256 không khớp: encrypted payload có thể đã bị thay đổi');
-  }
 
   const ciphertext = base64ToBytes(ciphertextBase64);
   const iv = base64ToBytes(ivBase64);

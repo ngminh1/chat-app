@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
   X,
@@ -26,7 +26,7 @@ export default function FriendsModal({
   const [loading, setLoading] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState(null);
 
-const fetchFriendsAndRequests = useCallback(async () => {
+  const fetchFriendsAndRequests = async () => {
     if (!currentUserId) return;
     setLoading(true);
     try {
@@ -41,13 +41,13 @@ const fetchFriendsAndRequests = useCallback(async () => {
     } finally {
       setLoading(false);
     }
-}, [currentUserId]);
+  };
 
-useEffect(() => {
-  if (isOpen) {
-    fetchFriendsAndRequests();
-  }
-}, [isOpen, fetchFriendsAndRequests]);
+  useEffect(() => {
+    if (isOpen) {
+      fetchFriendsAndRequests();
+    }
+  }, [isOpen, currentUserId]);
 
   if (!isOpen) return null;
 
@@ -56,7 +56,7 @@ useEffect(() => {
     try {
       await axios.put(`${API_BASE}/friends/${friendshipId}/accept`);
       await fetchFriendsAndRequests();
-    } catch  {
+    } catch (err) {
       alert("Lỗi khi chấp nhận lời mời");
     } finally {
       setActionLoadingId(null);
@@ -68,7 +68,7 @@ useEffect(() => {
     try {
       await axios.put(`${API_BASE}/friends/${friendshipId}/decline`);
       await fetchFriendsAndRequests();
-    } catch {
+    } catch (err) {
       alert("Lỗi khi từ chối lời mời");
     } finally {
       setActionLoadingId(null);
@@ -81,7 +81,7 @@ useEffect(() => {
     try {
       await axios.delete(`${API_BASE}/friends/${friendshipId}`);
       await fetchFriendsAndRequests();
-    } catch {
+    } catch (err) {
       alert("Lỗi khi hủy kết bạn");
     } finally {
       setActionLoadingId(null);

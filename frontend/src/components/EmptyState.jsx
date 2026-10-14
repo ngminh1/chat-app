@@ -1,4 +1,4 @@
-
+import React from 'react';
 import { MessageSquarePlus } from 'lucide-react';
 import DispatchLogo from './DispatchLogo';
 
