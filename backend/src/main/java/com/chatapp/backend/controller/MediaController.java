@@ -38,7 +38,8 @@ public class MediaController {
     public ResponseEntity<FileUploadResponse> uploadFile(
             @RequestParam("file") MultipartFile file,
             @RequestParam String purpose,
-            @RequestParam(required = false) Long conversationId) {
+            @RequestParam(required = false) Long conversationId,
+            @RequestParam(required = false) String sha256) {
         boolean avatar;
         if ("avatar".equals(purpose)) {
             avatar = true;
@@ -48,7 +49,7 @@ public class MediaController {
         } else {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Thiếu loại upload hoặc hội thoại");
         }
-        FileUploadResponse response = fileStorageService.storeFile(file, avatar, conversationId);
+        FileUploadResponse response = fileStorageService.storeFile(file, avatar, conversationId, sha256);
         return ResponseEntity.ok(response);
     }
 
