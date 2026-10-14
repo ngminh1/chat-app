@@ -20,11 +20,16 @@ if (Du quyen?) then (Co)
     if (Co raw AES key?) then (Co)
       :Kiem tra key 32 byte;
     else (Khong)
-      if (Hoi thoai co ciphertext cu?) then (Co)
-        :Bao loi mat khoa, KHONG tao lai;
+      if (Con wrapped key nhung ElGamal tat?) then (Co)
+        :Bao loi can bat ElGamal;
         stop
       else (Khong)
-        :Sinh AES key 32 byte;
+        if (Hoi thoai co ciphertext cu?) then (Co)
+          :Bao loi mat khoa, KHONG tao lai;
+          stop
+        else (Khong)
+          :Sinh AES key 32 byte;
+        endif
       endif
     endif
     if (ElGamal bat va chua co wrapped?) then (Co)
